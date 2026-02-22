@@ -1,5 +1,6 @@
 import { fromHono } from "chanfana";
 import { Hono } from "hono";
+import { SunriseCalendar } from "./endpoints/sunriseCalendar";
 import { TaskCreate } from "./endpoints/taskCreate";
 import { TaskDelete } from "./endpoints/taskDelete";
 import { TaskFetch } from "./endpoints/taskFetch";
@@ -14,6 +15,7 @@ const openapi = fromHono(app, {
 });
 
 // Register OpenAPI endpoints
+openapi.get("/api/sunrise", SunriseCalendar);
 openapi.get("/api/tasks", TaskList);
 openapi.post("/api/tasks", TaskCreate);
 openapi.get("/api/tasks/:taskSlug", TaskFetch);
