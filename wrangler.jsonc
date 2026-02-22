@@ -12,6 +12,9 @@
 	},
 	"compatibility_flags": [
 		"nodejs_compat"
+	],
+	"routes": [
+		{ "pattern": "cal.sunlight.nz", "custom_domain": true }
 	]
 	/**
 	 * Smart Placement
