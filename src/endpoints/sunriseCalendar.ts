@@ -3,28 +3,73 @@ import { z } from "zod";
 import SunCalc from "suncalc";
 import type { AppContext } from "../types";
 
-// AIDEV-NOTE: iCal UTC timestamps must be formatted as YYYYMMDDTHHMMSSz (no dashes/colons, trailing Z)
-function formatIcalDate(date: Date): string {
-	return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-}
+// AIDEV-NOTE: Express times in approximate local timezone (rounded from longitude) so events land
+// on the correct calendar date in Google Calendar. Using UTC timestamps caused sunrise events for
+// UTC+ locations (e.g. NZ UTC+12) to appear on the previous calendar day since their DTSTART
+// would be in the evening of the prior UTC day (e.g. 19:32 UTC May 18 = 7:32 AM NZ May 19).
+// The approximation (round(lon/15)) may be off by 1 hour during DST, but the day is always correct.
 
-// AIDEV-NOTE: UIDs must be stable across calendar refreshes so Google Calendar doesn't duplicate events
-function eventUid(type: "sunrise" | "sunset", date: Date, lat: number, lon: number): string {
-	const d = date.toISOString().slice(0, 10).replace(/-/g, "");
-	return `${type}-${d}-${lat}-${lon}@sunlight`;
-}
+// AIDEV-NOTE: UIDs must be stable across calendar refreshes so Google Calendar doesn't duplicate events.
+// UID date uses the local date (via the offset) so it matches the calendar day the event appears on.
 
 // AIDEV-NOTE: suncalc returns NaN dates during polar night / midnight sun — always guard with isNaN check
-function buildEvent(type: "sunrise" | "sunset", time: Date, label: string, date: Date, lat: number, lon: number): string | null {
+
+function approxUtcOffsetHours(lon: number): number {
+	return Math.round(lon / 15);
+}
+
+// Format a UTC Date as a local datetime string (YYYYMMDDTHHmmss) by applying the given hour offset
+function formatLocalDate(utcDate: Date, offsetHours: number): string {
+	const local = new Date(utcDate.getTime() + offsetHours * 3_600_000);
+	return local.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "");
+}
+
+// Return the local YYYY-MM-DD for a UTC Date given an hour offset
+function localDateString(utcDate: Date, offsetHours: number): string {
+	const local = new Date(utcDate.getTime() + offsetHours * 3_600_000);
+	return local.toISOString().slice(0, 10);
+}
+
+function eventUid(type: "sunrise" | "sunset", localDate: string, lat: number, lon: number): string {
+	return `${type}-${localDate.replace(/-/g, "")}-${lat}-${lon}@sunlight`;
+}
+
+function buildEvent(
+	type: "sunrise" | "sunset",
+	time: Date,
+	label: string,
+	tzId: string,
+	offsetHours: number,
+	lat: number,
+	lon: number,
+): string | null {
 	if (!time || isNaN(time.getTime())) return null;
-	const end = new Date(time.getTime() + 60_000); // 1-minute duration for all-day-adjacent display
+	const end = new Date(time.getTime() + 60_000); // 1-minute duration
+	const localDate = localDateString(time, offsetHours);
 	return [
 		"BEGIN:VEVENT",
-		`DTSTART:${formatIcalDate(time)}`,
-		`DTEND:${formatIcalDate(end)}`,
+		`DTSTART;TZID=${tzId}:${formatLocalDate(time, offsetHours)}`,
+		`DTEND;TZID=${tzId}:${formatLocalDate(end, offsetHours)}`,
 		`SUMMARY:${label}`,
-		`UID:${eventUid(type, date, lat, lon)}`,
+		`UID:${eventUid(type, localDate, lat, lon)}`,
 		"END:VEVENT",
+	].join("\r\n");
+}
+
+function buildVtimezone(tzId: string, offsetHours: number): string {
+	const sign = offsetHours >= 0 ? "+" : "-";
+	const abs = Math.abs(offsetHours);
+	const offset = `${sign}${String(abs).padStart(2, "0")}00`;
+	return [
+		"BEGIN:VTIMEZONE",
+		`TZID:${tzId}`,
+		"BEGIN:STANDARD",
+		"DTSTART:16010101T000000",
+		`TZOFFSETFROM:${offset}`,
+		`TZOFFSETTO:${offset}`,
+		`TZNAME:${tzId}`,
+		"END:STANDARD",
+		"END:VTIMEZONE",
 	].join("\r\n");
 }
 
@@ -57,6 +102,10 @@ export class SunriseCalendar extends OpenAPIRoute {
 		const data = await this.getValidatedData<typeof this.schema>();
 		const { lat, lon } = data.query;
 
+		const offsetHours = approxUtcOffsetHours(lon);
+		const sign = offsetHours >= 0 ? "+" : "-";
+		const tzId = `UTC${sign}${String(Math.abs(offsetHours)).padStart(2, "0")}`;
+
 		// Generate events from 1 year ago through 2 years from now
 		const now = new Date();
 		const start = new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1));
@@ -68,8 +117,8 @@ export class SunriseCalendar extends OpenAPIRoute {
 			const day = new Date(d); // snapshot before mutation
 			const times = SunCalc.getTimes(day, lat, lon);
 
-			const rise = buildEvent("sunrise", times.sunrise, "Sunrise", day, lat, lon);
-			const set = buildEvent("sunset", times.sunset, "Sunset", day, lat, lon);
+			const rise = buildEvent("sunrise", times.sunrise, "Sunrise", tzId, offsetHours, lat, lon);
+			const set = buildEvent("sunset", times.sunset, "Sunset", tzId, offsetHours, lat, lon);
 
 			if (rise) events.push(rise);
 			if (set) events.push(set);
@@ -82,7 +131,7 @@ export class SunriseCalendar extends OpenAPIRoute {
 			"CALSCALE:GREGORIAN",
 			"METHOD:PUBLISH",
 			`X-WR-CALNAME:Sunrise & Sunset (${lat}, ${lon})`,
-			"X-WR-TIMEZONE:UTC",
+			buildVtimezone(tzId, offsetHours),
 			...events,
 			"END:VCALENDAR",
 		].join("\r\n");
