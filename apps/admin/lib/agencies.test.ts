@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAllAgenciesQuery,
   buildAgencyListQuery,
   buildAgencyWhereClause,
   buildAssignTemplateUpdate,
@@ -59,6 +60,16 @@ describe("buildAgencyListQuery", () => {
     expect(query.sql).toContain("lower(name) LIKE ?");
     expect(query.sql).toContain("lower(slug) LIKE ?");
     expect(query.bindings).toEqual(["%health%", "%health%", 25, 25]);
+  });
+});
+
+describe("buildAllAgenciesQuery", () => {
+  it("returns the browser list without pagination", () => {
+    const query = buildAllAgenciesQuery();
+
+    expect(query.sql).toContain("FROM sunlight_agencies");
+    expect(query.sql).not.toContain("LIMIT");
+    expect(query.bindings).toEqual([]);
   });
 });
 

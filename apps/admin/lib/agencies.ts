@@ -138,11 +138,42 @@ export function buildAgencyListQuery(filters: Partial<AgencyFilters> = {}) {
   return { bindings: [...where.bindings, pageSize, offset], sql };
 }
 
+export function buildAllAgenciesQuery() {
+  return {
+    bindings: [],
+    sql: `
+      SELECT
+        id,
+        name,
+        slug,
+        legal_regime,
+        primary_request_email,
+        contact_status,
+        status
+      FROM sunlight_agencies
+      ORDER BY
+        CASE contact_status
+          WHEN 'verified' THEN 0
+          WHEN 'needs_review' THEN 1
+          WHEN 'missing' THEN 2
+          ELSE 3
+        END,
+        name
+    `,
+  };
+}
+
 export async function listAgencies(
   db: D1Database,
   filters: AgencyFilters,
 ): Promise<AgencyListItem[]> {
   const query = buildAgencyListQuery(filters);
+  const result = await db.prepare(query.sql).bind(...query.bindings).all<AgencyListItem>();
+  return result.results;
+}
+
+export async function listAllAgencies(db: D1Database): Promise<AgencyListItem[]> {
+  const query = buildAllAgenciesQuery();
   const result = await db.prepare(query.sql).bind(...query.bindings).all<AgencyListItem>();
   return result.results;
 }

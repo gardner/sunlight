@@ -66,8 +66,9 @@ Completed:
 * Converted the admin dashboard overview to local shadcn-style `Button`, `Card`,
   and `Badge` components.
 * Added paginated agency listing queries and count metadata.
-* Added debounced filtering-as-you-type for the admin agencies page.
-* Added agency pagination controls that preserve filters and page size.
+* Added immediate browser-side filtering-as-you-type for the admin agencies page
+  using both `onKeyUp` and `onChange` input paths.
+* Added agency pagination controls and page-size selection.
 
 ## Verification
 

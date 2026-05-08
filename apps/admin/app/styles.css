@@ -286,9 +286,10 @@ tr:last-child td {
   gap: 6px;
 }
 
-.pageNumbers a,
+.pageNumbers button,
 .pageNumbers span {
   align-items: center;
+  background: #ffffff;
   border-radius: 6px;
   color: #35516c;
   display: inline-flex;
@@ -300,11 +301,12 @@ tr:last-child td {
   text-decoration: none;
 }
 
-.pageNumbers a {
+.pageNumbers button {
   border: 1px solid #cbd6e2;
+  cursor: pointer;
 }
 
-.pageNumbers a.currentPage {
+.pageNumbers button.currentPage {
   background: #1d4f8f;
   border-color: #1d4f8f;
   color: #ffffff;
