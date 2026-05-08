@@ -121,6 +121,11 @@ h2 {
   text-decoration: none;
 }
 
+.button.secondary {
+  background: #eef3f7;
+  color: #1d2430;
+}
+
 .button.primary {
   background: #0f6f4d;
 }
@@ -161,7 +166,7 @@ h2 {
   align-items: end;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(160px, 200px)) auto;
+  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(140px, 180px)) auto;
   margin-bottom: 20px;
 }
 
@@ -170,6 +175,11 @@ h2 {
   display: grid;
   font-size: 13px;
   gap: 6px;
+}
+
+.filterActions {
+  display: flex;
+  gap: 8px;
 }
 
 input,
@@ -199,6 +209,19 @@ textarea {
   border: 1px solid #dfe5ec;
   border-radius: 8px;
   overflow: hidden;
+}
+
+.tableMeta {
+  align-items: center;
+  color: #607086;
+  display: flex;
+  font-size: 14px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.tableMeta p {
+  margin: 0;
 }
 
 table {
@@ -242,6 +265,49 @@ tr:last-child td {
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+}
+
+.pagination {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.pagination a[aria-disabled="true"] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.pageNumbers {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.pageNumbers a,
+.pageNumbers span {
+  align-items: center;
+  border-radius: 6px;
+  color: #35516c;
+  display: inline-flex;
+  font-size: 14px;
+  justify-content: center;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 0 8px;
+  text-decoration: none;
+}
+
+.pageNumbers a {
+  border: 1px solid #cbd6e2;
+}
+
+.pageNumbers a.currentPage {
+  background: #1d4f8f;
+  border-color: #1d4f8f;
+  color: #ffffff;
 }
 
 .panel {

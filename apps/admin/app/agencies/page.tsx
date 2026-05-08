@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
-import { listAgencies, normalizeAgencyFilters } from "../../lib/agencies";
+import { Button } from "@admin/components/ui/button";
+import { listAgencyPage, normalizeAgencyFilters, type AgencyFilters } from "../../lib/agencies";
+import { AgencyFiltersForm } from "./AgencyFilters";
 
 interface AgenciesPageProps {
   searchParams?: Promise<Record<string, string | undefined>>;
@@ -8,7 +10,9 @@ interface AgenciesPageProps {
 export default async function AgenciesPage({ searchParams }: AgenciesPageProps) {
   const params = (await searchParams) ?? {};
   const filters = normalizeAgencyFilters(params);
-  const agencies = await listAgencies((env as unknown as CloudflareEnv).DB, filters);
+  const agencyPage = await listAgencyPage((env as unknown as CloudflareEnv).DB, filters);
+  const firstVisible = agencyPage.total === 0 ? 0 : (agencyPage.page - 1) * agencyPage.pageSize + 1;
+  const lastVisible = Math.min(agencyPage.total, firstVisible + agencyPage.items.length - 1);
 
   return (
     <main className="shell">
@@ -17,38 +21,22 @@ export default async function AgenciesPage({ searchParams }: AgenciesPageProps) 
           <p className="eyebrow">Admin</p>
           <h1>Agencies</h1>
         </div>
-        <a className="button" href="/">
-          Dashboard
-        </a>
+        <Button asChild>
+          <a href="/">Dashboard</a>
+        </Button>
       </header>
 
-      <form className="filters">
-        <label>
-          Search
-          <input name="search" defaultValue={filters.search ?? ""} />
-        </label>
-        <label>
-          Contact
-          <select name="contactStatus" defaultValue={filters.contactStatus ?? ""}>
-            <option value="">Any</option>
-            <option value="missing">Missing</option>
-            <option value="needs_review">Needs review</option>
-            <option value="verified">Verified</option>
-            <option value="invalid">Invalid</option>
-          </select>
-        </label>
-        <label>
-          Status
-          <select name="status" defaultValue={filters.status ?? ""}>
-            <option value="">Any</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-        </label>
-        <button className="button" type="submit">
-          Filter
-        </button>
-      </form>
+      <AgencyFiltersForm filters={filters} />
+
+      <div className="tableMeta">
+        <p>
+          Showing {firstVisible.toLocaleString()}-{lastVisible.toLocaleString()} of{" "}
+          {agencyPage.total.toLocaleString()} agencies
+        </p>
+        <p>
+          Page {agencyPage.page.toLocaleString()} of {agencyPage.pageCount.toLocaleString()}
+        </p>
+      </div>
 
       <div className="table">
         <table>
@@ -62,7 +50,7 @@ export default async function AgenciesPage({ searchParams }: AgenciesPageProps) 
             </tr>
           </thead>
           <tbody>
-            {agencies.map((agency) => (
+            {agencyPage.items.map((agency) => (
               <tr key={agency.id}>
                 <td>
                   <a href={`/agencies/${agency.id}`}>{agency.name}</a>
@@ -75,9 +63,100 @@ export default async function AgenciesPage({ searchParams }: AgenciesPageProps) 
                 <td>{agency.primary_request_email ?? ""}</td>
               </tr>
             ))}
+            {agencyPage.items.length === 0 ? (
+              <tr>
+                <td colSpan={5}>No agencies match the current filters.</td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
+
+      <Pagination filters={filters} page={agencyPage.page} pageCount={agencyPage.pageCount} />
     </main>
   );
+}
+
+function Pagination({
+  filters,
+  page,
+  pageCount,
+}: {
+  filters: AgencyFilters;
+  page: number;
+  pageCount: number;
+}) {
+  const pages = buildPaginationPages(page, pageCount);
+
+  return (
+    <nav className="pagination" aria-label="Agency pagination">
+      <Button asChild disabled={page <= 1} variant="outline">
+        <a aria-disabled={page <= 1} href={buildAgencyPageHref(filters, page - 1)}>
+          Previous
+        </a>
+      </Button>
+      <div className="pageNumbers">
+        {pages.map((item, index) =>
+          item === "gap" ? (
+            <span aria-hidden="true" key={`${item}-${index}`}>
+              ...
+            </span>
+          ) : (
+            <a
+              aria-current={item === page ? "page" : undefined}
+              className={item === page ? "currentPage" : ""}
+              href={buildAgencyPageHref(filters, item)}
+              key={item}
+            >
+              {item}
+            </a>
+          ),
+        )}
+      </div>
+      <Button asChild disabled={page >= pageCount} variant="outline">
+        <a aria-disabled={page >= pageCount} href={buildAgencyPageHref(filters, page + 1)}>
+          Next
+        </a>
+      </Button>
+    </nav>
+  );
+}
+
+function buildAgencyPageHref(filters: AgencyFilters, page: number): string {
+  const params = new URLSearchParams();
+  const boundedPage = Math.max(1, page);
+
+  if (filters.search) {
+    params.set("search", filters.search);
+  }
+  if (filters.contactStatus) {
+    params.set("contactStatus", filters.contactStatus);
+  }
+  if (filters.status) {
+    params.set("status", filters.status);
+  }
+  if (filters.pageSize !== 50) {
+    params.set("pageSize", String(filters.pageSize));
+  }
+  if (boundedPage > 1) {
+    params.set("page", String(boundedPage));
+  }
+
+  return params.toString() ? `/agencies?${params}` : "/agencies";
+}
+
+function buildPaginationPages(page: number, pageCount: number): Array<number | "gap"> {
+  const pages = new Set([1, page - 1, page, page + 1, pageCount]);
+  const sorted = [...pages].filter((item) => item >= 1 && item <= pageCount).sort((a, b) => a - b);
+  const output: Array<number | "gap"> = [];
+
+  for (const item of sorted) {
+    const previous = output[output.length - 1];
+    if (typeof previous === "number" && item - previous > 1) {
+      output.push("gap");
+    }
+    output.push(item);
+  }
+
+  return output;
 }

@@ -65,6 +65,9 @@ Completed:
 * Added shadcn/Tailwind v4 plumbing for the admin Vinext app.
 * Converted the admin dashboard overview to local shadcn-style `Button`, `Card`,
   and `Badge` components.
+* Added paginated agency listing queries and count metadata.
+* Added debounced filtering-as-you-type for the admin agencies page.
+* Added agency pagination controls that preserve filters and page size.
 
 ## Verification
 
@@ -122,11 +125,13 @@ Important naming boundary:
    so D1 admin roles are enforced inside the app as well as at the edge.
 2. Continue moving admin pages from legacy CSS classes to shadcn-style local
    components.
-3. Do a controlled live Cloudflare Email Sending test before sending to real
+3. Consider replacing the agencies table/filter controls with shadcn form/table
+   primitives after the base behavior has settled.
+4. Do a controlled live Cloudflare Email Sending test before sending to real
    agencies.
-4. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+5. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
-5. Add multipart upload support and per-file retry/remove controls.
-6. Investigate the Vinext dev-server 404 and confirm local previews work.
-7. Generate two landing page design directions from `docs/WEB.md`, then select
+6. Add multipart upload support and per-file retry/remove controls.
+7. Investigate the Vinext dev-server 404 and confirm local previews work.
+8. Generate two landing page design directions from `docs/WEB.md`, then select
    the implementation direction for the Vinext landing app.

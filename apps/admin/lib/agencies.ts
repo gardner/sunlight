@@ -3,8 +3,18 @@ export type AgencyStatus = "active" | "inactive";
 
 export interface AgencyFilters {
   contactStatus?: ContactStatus;
+  page: number;
+  pageSize: number;
   search?: string;
   status?: AgencyStatus;
+}
+
+export interface AgencyListPage {
+  items: AgencyListItem[];
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  total: number;
 }
 
 export interface AgencyListItem {
@@ -36,9 +46,14 @@ const CONTACT_STATUSES = new Set<ContactStatus>([
 ]);
 
 const AGENCY_STATUSES = new Set<AgencyStatus>(["active", "inactive"]);
+const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZES = new Set([25, 50, 100]);
 
 export function normalizeAgencyFilters(input: Record<string, string | undefined>): AgencyFilters {
-  const filters: AgencyFilters = {};
+  const filters: AgencyFilters = {
+    page: normalizePositiveInteger(input.page, 1),
+    pageSize: normalizePageSize(input.pageSize),
+  };
   const contactStatus = input.contactStatus;
   const status = input.status;
   const search = input.search?.trim();
@@ -56,7 +71,7 @@ export function normalizeAgencyFilters(input: Record<string, string | undefined>
   return filters;
 }
 
-export function buildAgencyListQuery(filters: AgencyFilters = {}) {
+export function buildAgencyWhereClause(filters: Partial<AgencyFilters> = {}) {
   const where = [];
   const bindings: string[] = [];
 
@@ -74,6 +89,30 @@ export function buildAgencyListQuery(filters: AgencyFilters = {}) {
     bindings.push(search, search);
   }
 
+  return {
+    bindings,
+    sql: where.length ? `WHERE ${where.join(" AND ")}` : "",
+  };
+}
+
+export function buildAgencyCountQuery(filters: Partial<AgencyFilters> = {}) {
+  const where = buildAgencyWhereClause(filters);
+  return {
+    bindings: where.bindings,
+    sql: `
+      SELECT COUNT(*) AS total
+      FROM sunlight_agencies
+      ${where.sql}
+    `,
+  };
+}
+
+export function buildAgencyListQuery(filters: Partial<AgencyFilters> = {}) {
+  const where = buildAgencyWhereClause(filters);
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
+  const offset = (page - 1) * pageSize;
+
   const sql = `
     SELECT
       id,
@@ -84,7 +123,7 @@ export function buildAgencyListQuery(filters: AgencyFilters = {}) {
       contact_status,
       status
     FROM sunlight_agencies
-    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ${where.sql}
     ORDER BY
       CASE contact_status
         WHEN 'verified' THEN 0
@@ -93,19 +132,42 @@ export function buildAgencyListQuery(filters: AgencyFilters = {}) {
         ELSE 3
       END,
       name
-    LIMIT 100
+    LIMIT ? OFFSET ?
   `;
 
-  return { bindings, sql };
+  return { bindings: [...where.bindings, pageSize, offset], sql };
 }
 
 export async function listAgencies(
   db: D1Database,
-  filters: AgencyFilters = {},
+  filters: AgencyFilters,
 ): Promise<AgencyListItem[]> {
   const query = buildAgencyListQuery(filters);
   const result = await db.prepare(query.sql).bind(...query.bindings).all<AgencyListItem>();
   return result.results;
+}
+
+export async function listAgencyPage(
+  db: D1Database,
+  filters: AgencyFilters,
+): Promise<AgencyListPage> {
+  const countQuery = buildAgencyCountQuery(filters);
+  const count = await db
+    .prepare(countQuery.sql)
+    .bind(...countQuery.bindings)
+    .first<{ total: number }>();
+  const total = count?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / filters.pageSize));
+  const page = Math.min(filters.page, pageCount);
+  const items = await listAgencies(db, { ...filters, page });
+
+  return {
+    items,
+    page,
+    pageCount,
+    pageSize: filters.pageSize,
+    total,
+  };
 }
 
 export async function getAgency(db: D1Database, agencyId: string): Promise<AgencyDetail | null> {
@@ -193,4 +255,17 @@ function normalizeEmail(value: string): string | null {
     return null;
   }
   return email;
+}
+
+function normalizePageSize(value: string | undefined): number {
+  const pageSize = normalizePositiveInteger(value, DEFAULT_PAGE_SIZE);
+  return PAGE_SIZES.has(pageSize) ? pageSize : DEFAULT_PAGE_SIZE;
+}
+
+function normalizePositiveInteger(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
