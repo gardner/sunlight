@@ -22,6 +22,7 @@ class AgencyContactScraperTests(unittest.TestCase):
     def test_rejects_bad_or_unsafe_addresses(self):
         self.assertIsNone(normalize_email("noreply@example.govt.nz"))
         self.assertIsNone(normalize_email("person@example"))
+        self.assertIsNone(normalize_email("privacy@example.govt.nz"))
         self.assertIsNone(normalize_email("not an email"))
 
     def test_discovers_mailto_visible_and_obfuscated_emails(self):
@@ -44,7 +45,7 @@ class AgencyContactScraperTests(unittest.TestCase):
 
         self.assertEqual(
             sorted(email.normalized_email for email in emails),
-            ["info@example.govt.nz", "oia@example.govt.nz", "privacy@example.govt.nz"],
+            ["info@example.govt.nz", "oia@example.govt.nz"],
         )
         self.assertEqual(emails[0].source_page_title, "Official information")
 

@@ -38,7 +38,7 @@ CONTEXT_TERMS = {
 }
 STRONG_LOCAL_PARTS = {
     "information", "information.requests", "informationrequests", "lgoinfo", "lgoima",
-    "official.information", "officialinformation", "oia", "privacy", "requests",
+    "official.information", "officialinformation", "oia", "requests",
 }
 MEDIUM_LOCAL_PARTS = {"admin", "contact", "enquiries", "info", "records"}
 WRONG_LOCAL_TERMS = {"careers", "hr", "jobs", "media", "news", "procurement", "recruitment", "tenders", "webmaster"}
@@ -282,7 +282,7 @@ def brave_search_urls(
     if not api_key or not agency.home_page_url:
         return []
     host = urlparse(agency.home_page_url).hostname or ""
-    query = f'site:{host} ("official information" OR OIA OR LGOIMA OR "information request" OR "information requests")'
+    query = f'site:{host} ("oia@" OR "lgoima@" OR "officialinformation@" OR "official.information@" OR "info@" OR "official information" OR OIA OR LGOIMA OR "information request")'
     try:
         response = session.get(
             "https://api.search.brave.com/res/v1/web/search",
@@ -398,7 +398,8 @@ def is_usable_email(local_part: str, domain: str) -> bool:
     if labels[0] == "example" and len(labels) == 2:
         return False
     compact_local = re.sub(r"[^a-z0-9]", "", local_part)
-    return compact_local not in {re.sub(r"[^a-z0-9]", "", item) for item in NO_REPLY_LOCAL_PARTS}
+    blocked = {re.sub(r"[^a-z0-9]", "", item) for item in NO_REPLY_LOCAL_PARTS} | {"privacy"}
+    return compact_local not in blocked
 
 
 def find_candidate_links(html: str, base_url: str, *, max_links: int = 500) -> list[PageLink]:
@@ -641,9 +642,7 @@ def short_snippet(value: str | None, *, limit: int = 240) -> str | None:
 
 
 def sql(value: str | None) -> str:
-    if value is None:
-        return "NULL"
-    return "'" + value.replace("'", "''") + "'"
+    return "NULL" if value is None else "'" + value.replace("'", "''") + "'"
 
 
 if __name__ == "__main__":
