@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import random
@@ -16,6 +15,11 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
+
+try:
+    from scripts.contact_scrape_sql import build_scrape_sql, candidate_id, sql
+except ModuleNotFoundError:
+    from contact_scrape_sql import build_scrape_sql, candidate_id, sql
 
 USER_AGENT = "SunlightRequestsContactScraper/0.1 (+https://sunlight.nz)"
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
@@ -79,6 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-file", type=Path, help="JSON file containing authority rows.")
     parser.add_argument("--limit", type=int, default=50, help="Maximum authority rows to scrape.")
     parser.add_argument("--offset", type=int, default=0, help="Skip matching authority rows before scraping.")
+    parser.add_argument("--retry-attempted", action="store_true", help="Include authorities that already have a scrape attempt.")
     parser.add_argument("--max-pages-per-authority", type=int, default=8, help="Maximum pages to fetch per authority.")
     parser.add_argument("--write-sql", type=Path, help="Write generated SQL to this path.")
     parser.add_argument("--dry-run", action="store_true", help="Print a summary without applying generated SQL.")
@@ -120,16 +125,41 @@ def load_authorities(args: argparse.Namespace) -> list[Authority]:
     if args.source_file:
         rows = json.loads(args.source_file.read_text())
     else:
-        rows = fetch_authority_rows(args.database, remote=args.remote, authority_id=args.authority_id, limit=args.limit, offset=args.offset)
+        rows = fetch_authority_rows(
+            args.database,
+            remote=args.remote,
+            authority_id=args.authority_id,
+            limit=args.limit,
+            offset=args.offset,
+            retry_attempted=args.retry_attempted,
+        )
     authorities = [authority_from_row(row) for row in rows]
     scrapable = [authority for authority in authorities if should_scrape_authority(authority, args.authority_id)]
     return scrapable[args.offset : args.offset + args.limit] if args.source_file else scrapable
 
 
-def fetch_authority_rows(database: str, *, remote: bool, authority_id: str | None, limit: int, offset: int) -> list[dict[str, Any]]:
+def fetch_authority_rows(
+    database: str,
+    *,
+    remote: bool,
+    authority_id: str | None,
+    limit: int,
+    offset: int,
+    retry_attempted: bool,
+) -> list[dict[str, Any]]:
     where = ["status = 'active'", "contact_status IN ('missing', 'needs_review', 'invalid')"]
     if authority_id:
         where.append(f"id = {sql(authority_id)}")
+    if not retry_attempted and not authority_id:
+        where.append(
+            """
+            NOT EXISTS (
+              SELECT 1
+              FROM sunlight_authority_contact_scrape_attempts
+              WHERE sunlight_authority_contact_scrape_attempts.authority_id = sunlight_authorities.id
+            )
+            """.strip()
+        )
     query = f"""
 SELECT id, name, source_url, source_metadata_json, contact_status
 FROM sunlight_authorities
@@ -534,77 +564,6 @@ def domains_match(email_domain: str, host: str) -> bool:
     return email_domain == host or email_domain.endswith(f".{host}") or host.endswith(f".{email_domain}")
 
 
-def build_scrape_sql(candidates_by_authority: dict[str, list[EmailCandidate]]) -> str:
-    statements: list[str] = []
-    for authority_id, candidates in candidates_by_authority.items():
-        for candidate in candidates:
-            statements.append(candidate_upsert_statement(authority_id, candidate))
-        if candidates:
-            statements.append(mark_needs_review_statement(authority_id))
-    return "\n".join(statements) + ("\n" if statements else "")
-
-
-def candidate_upsert_statement(authority_id: str, candidate: EmailCandidate) -> str:
-    candidate_key = candidate_id(authority_id, candidate.normalized_email, candidate.source_url)
-    return f"""
-INSERT INTO sunlight_authority_contact_candidates (
-  id,
-  authority_id,
-  email,
-  normalized_email,
-  source_url,
-  source_page_title,
-  source_snippet,
-  discovery_method,
-  confidence,
-  confidence_reason,
-  status
-) VALUES (
-  {sql(candidate_key)},
-  {sql(authority_id)},
-  {sql(candidate.email)},
-  {sql(candidate.normalized_email)},
-  {sql(candidate.source_url)},
-  {sql(candidate.source_page_title)},
-  {sql(candidate.source_snippet)},
-  {sql(candidate.discovery_method)},
-  {candidate.confidence},
-  {sql(candidate.confidence_reason)},
-  'candidate'
-)
-ON CONFLICT(authority_id, normalized_email, source_url) DO UPDATE SET
-  email = excluded.email,
-  source_page_title = excluded.source_page_title,
-  source_snippet = excluded.source_snippet,
-  discovery_method = excluded.discovery_method,
-  confidence = excluded.confidence,
-  confidence_reason = excluded.confidence_reason,
-  status = CASE
-    WHEN sunlight_authority_contact_candidates.status IN ('accepted', 'rejected')
-    THEN sunlight_authority_contact_candidates.status
-    ELSE excluded.status
-  END,
-  last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
-""".strip()
-
-
-def mark_needs_review_statement(authority_id: str) -> str:
-    return f"""
-UPDATE sunlight_authorities
-SET
-  contact_status = 'needs_review',
-  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE id = {sql(authority_id)}
-  AND contact_status IN ('missing', 'invalid');
-""".strip()
-
-
-def candidate_id(authority_id: str, normalized_email: str, source_url: str) -> str:
-    digest = hashlib.sha256(f"{authority_id}\0{normalized_email}\0{source_url}".encode()).hexdigest()[:24]
-    return f"acc_{digest}"
-
-
 def apply_sql(database: str, generated_sql: str, *, remote: bool) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as file:
         file.write(generated_sql)
@@ -640,10 +599,6 @@ def short_snippet(value: str | None, *, limit: int = 240) -> str | None:
         return None
     collapsed = " ".join(value.split())
     return collapsed[:limit]
-
-
-def sql(value: str | None) -> str:
-    return "NULL" if value is None else "'" + value.replace("'", "''") + "'"
 
 
 if __name__ == "__main__":

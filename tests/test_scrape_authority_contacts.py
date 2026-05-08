@@ -5,6 +5,7 @@ from scripts.scrape_authority_contacts import (
     build_scrape_sql,
     candidate_id,
     discover_page_emails,
+    EmailCandidate,
     fetch_authority_pages,
     find_candidate_links,
     normalize_email,
@@ -167,7 +168,66 @@ class AuthorityContactScraperTests(unittest.TestCase):
         self.assertIn(candidate_id("agy_1", "oia@example.govt.nz", "https://example.govt.nz/contact"), generated)
         self.assertIn("ON CONFLICT(authority_id, normalized_email, source_url) DO UPDATE", generated)
         self.assertIn("contact_status = 'needs_review'", generated)
+        self.assertIn("sunlight_authority_contact_scrape_attempts", generated)
+        self.assertIn("'needs_review'", generated)
         self.assertNotIn("primary_request_email", generated)
+
+    def test_records_no_candidate_attempts(self):
+        generated = build_scrape_sql({"auth_1": []})
+
+        self.assertIn("sunlight_authority_contact_scrape_attempts", generated)
+        self.assertIn("'no_candidate'", generated)
+        self.assertNotIn("sunlight_authority_contact_candidates", generated)
+
+    def test_auto_verifies_one_clear_candidate(self):
+        candidate = EmailCandidate(
+            email="oia@example.govt.nz",
+            normalized_email="oia@example.govt.nz",
+            source_url="https://example.govt.nz/oia",
+            source_page_title="Official information requests",
+            source_snippet="Email oia@example.govt.nz",
+            discovery_method="linked_page",
+            confidence=85,
+            confidence_reason="strong local part",
+        )
+
+        generated = build_scrape_sql({"auth_1": [candidate]})
+
+        self.assertIn("'accepted'", generated)
+        self.assertIn("primary_request_email = 'oia@example.govt.nz'", generated)
+        self.assertIn("contact_status = 'verified'", generated)
+        self.assertIn("authority.contact_auto_verified", generated)
+        self.assertIn("'auto_verified'", generated)
+        self.assertNotIn("contact_status = 'needs_review'", generated)
+
+    def test_keeps_ambiguous_candidates_for_review(self):
+        candidates = [
+            EmailCandidate(
+                email="info@example.govt.nz",
+                normalized_email="info@example.govt.nz",
+                source_url="https://example.govt.nz/contact",
+                source_page_title="Contact",
+                source_snippet="info@example.govt.nz",
+                discovery_method="linked_page",
+                confidence=65,
+                confidence_reason="medium local part",
+            ),
+            EmailCandidate(
+                email="enquiries@example.govt.nz",
+                normalized_email="enquiries@example.govt.nz",
+                source_url="https://example.govt.nz/contact",
+                source_page_title="Contact",
+                source_snippet="enquiries@example.govt.nz",
+                discovery_method="linked_page",
+                confidence=60,
+                confidence_reason="medium local part",
+            ),
+        ]
+
+        generated = build_scrape_sql({"auth_1": candidates})
+
+        self.assertIn("contact_status = 'needs_review'", generated)
+        self.assertNotIn("contact_status = 'verified'", generated)
 
 
 class FakeResponse:
