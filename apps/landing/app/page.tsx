@@ -72,7 +72,7 @@ export default function LandingPage() {
             Sunlight collects official information responses from public authorities, preserves them with clear provenance, and prepares them for careful review, search, and reuse.
           </p>
           <p className="context">
-            Sunlight is an independent project. It is not a government service, and material sent to Sunlight is not published automatically.
+            Sunlight is an independent project. It is not a government service. Material sent to Sunlight is preserved for review and will be searchable in the future.
           </p>
           <div className="hero-actions" aria-label="Landing page actions">
             <a className="button button-primary" href="#about">
@@ -193,7 +193,7 @@ export default function LandingPage() {
           <a href="#method">Privacy</a>
           <a href="#about">Project status</a>
         </nav>
-        <span>Sunlight is an independent public-interest project. It is not part of government. Material received by Sunlight is preserved for review and processing and is not published automatically.</span>
+        <span>Sunlight is an independent public-interest project. It is not part of government. Material received by Sunlight is preserved for review and processing, and will be searchable in the future.</span>
       </footer>
     </main>
   );
