@@ -107,7 +107,7 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
           <table>
             <thead>
               <tr>
-                <th>Agency</th>
+                <th>Authority</th>
                 <th>Email</th>
                 <th>Status</th>
                 <th>Due</th>
@@ -117,7 +117,7 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
             <tbody>
               {requests.map((request) => (
                 <tr key={request.id}>
-                  <td>{request.agency_name}</td>
+                  <td>{request.authority_name}</td>
                   <td>{request.primary_request_email}</td>
                   <td>
                     <span className="pill">{request.status}</span>
@@ -169,7 +169,7 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
           <table>
             <thead>
               <tr>
-                <th>Agency</th>
+                <th>Authority</th>
                 <th>Recipients</th>
                 <th>Status</th>
                 <th>Sent</th>
@@ -179,7 +179,7 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
             <tbody>
               {outboundEmails.map((email) => (
                 <tr key={email.id}>
-                  <td>{email.agency_name}</td>
+                  <td>{email.authority_name}</td>
                   <td>{email.to_emails_json}</td>
                   <td>
                     <span className="pill">{email.status}</span>

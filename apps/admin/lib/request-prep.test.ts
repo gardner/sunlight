@@ -21,8 +21,8 @@ describe("addWorkingDays", () => {
 describe("template rendering", () => {
   it("renders known variables", () => {
     expect(
-      renderTemplate("Kia ora {agency_name}: {response_url}", {
-        agency_name: "The Treasury",
+      renderTemplate("Kia ora {authority_name}: {response_url}", {
+        authority_name: "The Treasury",
         response_url: "https://requests.sunlight.nz/response/token",
       }),
     ).toBe("Kia ora The Treasury: https://requests.sunlight.nz/response/token");
@@ -38,7 +38,7 @@ describe("case token helpers", () => {
     expect(buildReplyEmail("abc123")).toBe("reply-abc123@sunlight.nz");
   });
 
-  it("builds agency response URLs", () => {
+  it("builds authority response URLs", () => {
     expect(buildResponseUrl("abc123")).toBe("https://requests.sunlight.nz/response/abc123");
   });
 });

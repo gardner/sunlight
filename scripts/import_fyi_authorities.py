@@ -132,7 +132,7 @@ def upsert_statement(row: dict[str, str]) -> str:
     }
 
     return f"""
-INSERT INTO sunlight_agencies (
+INSERT INTO sunlight_authorities (
   id,
   name,
   slug,
@@ -173,7 +173,7 @@ ON CONFLICT(source, source_id) DO UPDATE SET
   source_metadata_json = excluded.source_metadata_json,
   notes = excluded.notes,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE sunlight_agencies.contact_status != 'verified';
+WHERE sunlight_authorities.contact_status != 'verified';
 """.strip()
 
 

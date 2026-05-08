@@ -1,13 +1,13 @@
-# Agency Contact Scraper
+# Authority Contact Scraper
 
 ## Purpose
 
-Sunlight needs public submission email addresses for agencies so it can send
+Sunlight needs public submission email addresses for authorities so it can send
 `SunlightRequest` emails asking for OIA/LGOIMA request and response material.
 
-The FYI authority import gives us agency identity, source URLs, home pages, and
+The FYI authority import gives us authority identity, source URLs, home pages, and
 legal-regime hints. It does not provide reliable public request-intake email
-addresses. Most imported agencies therefore start with:
+addresses. Most imported authorities therefore start with:
 
 * `primary_request_email = null`
 * `secondary_request_emails_json = []`
@@ -20,7 +20,7 @@ admin review queue.
 
 ## Outcome
 
-For each agency, the scraper should produce:
+For each authority, the scraper should produce:
 
 * candidate email addresses
 * evidence URLs where each candidate appeared
@@ -31,9 +31,9 @@ For each agency, the scraper should produce:
 
 After review, an operator can set:
 
-* `sunlight_agencies.primary_request_email`
-* `sunlight_agencies.secondary_request_emails_json`
-* `sunlight_agencies.contact_status = verified`
+* `sunlight_authorities.primary_request_email`
+* `sunlight_authorities.secondary_request_emails_json`
+* `sunlight_authorities.contact_status = verified`
 
 ## Source Priority
 
@@ -41,9 +41,9 @@ Scraping should prefer official sources over aggregators.
 
 Priority order:
 
-1. Agency home page from FYI metadata.
-2. Agency contact page linked from the home page.
-3. Agency OIA, LGOIMA, official information, privacy, or information request
+1. Authority home page from FYI metadata.
+2. Authority contact page linked from the home page.
+3. Authority OIA, LGOIMA, official information, privacy, or information request
    pages linked from the home page.
 4. FYI authority page as supporting evidence.
 5. Search-engine result pages only if explicitly enabled later.
@@ -97,14 +97,14 @@ Low-confidence or usually wrong:
 
 ## Data Model
 
-Add a candidate table rather than immediately mutating the agency contact field.
+Add a candidate table rather than immediately mutating the authority contact field.
 
-Recommended table: `sunlight_agency_contact_candidates`
+Recommended table: `sunlight_authority_contact_candidates`
 
 Fields:
 
 * `id`
-* `agency_id`
+* `authority_id`
 * `email`
 * `normalized_email`
 * `source_url`
@@ -121,11 +121,11 @@ Fields:
 
 Indexes:
 
-* `(agency_id, status, confidence)`
+* `(authority_id, status, confidence)`
 * `(normalized_email)`
 * `(source_url)`
 
-The scraper may also update `sunlight_agencies.contact_status` from `missing` to
+The scraper may also update `sunlight_authorities.contact_status` from `missing` to
 `needs_review` when at least one candidate is found. It must not overwrite
 `contact_status = verified`.
 
@@ -153,12 +153,12 @@ generation, and concurrency where possible.
 
 ## Fetching Strategy
 
-For each agency:
+For each authority:
 
-1. Read agency rows where:
+1. Read authority rows where:
    * `status = active`
    * `contact_status IN ('missing', 'needs_review', 'invalid')`
-   * optional `--agency-id` or `--limit` filter
+   * optional `--authority-id` or `--limit` filter
 2. Extract home page from `source_metadata_json.home_page`.
 3. Fetch the home page.
 4. Extract:
@@ -169,15 +169,15 @@ For each agency:
 5. Fetch a small number of high-value internal links.
 6. Score all discovered candidate emails.
 7. Emit SQL upserts for candidate rows.
-8. Mark agency `needs_review` if candidates exist and the agency is not already
+8. Mark authority `needs_review` if candidates exist and the authority is not already
    `verified`.
 
 Recommended limits:
 
-* default agencies per run: 50
-* max pages per agency: 8
+* default authorities per run: 50
+* max pages per authority: 8
 * request timeout: 20 seconds
-* delay between agencies: configurable, default 250-500 ms
+* delay between authorities: configurable, default 250-500 ms
 * skip files such as PDF, DOCX, images, archives, and videos
 
 ## URL Selection
@@ -218,7 +218,7 @@ Extract from:
 
 * `mailto:` links
 * visible text
-* lightly obfuscated text such as `name [at] agency.govt.nz`
+* lightly obfuscated text such as `name [at] authority.govt.nz`
 
 Normalize by:
 
@@ -244,8 +244,8 @@ Suggested scoring:
 * +35 email local part strongly matches OIA/LGOIMA/request terms
 * +20 source URL contains OIA/LGOIMA/official-information terms
 * +15 page title or nearby text contains OIA/LGOIMA/request terms
-* +10 domain appears to match agency home-page domain
-* +5 source is agency home page or linked page
+* +10 domain appears to match authority home-page domain
+* +5 source is authority home page or linked page
 * -30 local part looks personal
 * -25 local part is media/recruitment/procurement/webmaster
 * -40 no-reply style address
@@ -261,15 +261,15 @@ Suggested thresholds:
 Recommended script:
 
 ```bash
-uv run python scripts/scrape_agency_contacts.py --database sunlight-requests --remote --limit 50
+uv run python scripts/scrape_authority_contacts.py --database sunlight-requests --remote --limit 50
 ```
 
 Useful options:
 
-* `--agency-id agy_fyi_example`
-* `--source-file path/to/agencies.json`
+* `--authority-id agy_fyi_example`
+* `--source-file path/to/authorities.json`
 * `--limit 50`
-* `--max-pages-per-agency 8`
+* `--max-pages-per-authority 8`
 * `--write-sql out.sql`
 * `--remote`
 * `--dry-run`
@@ -288,15 +288,15 @@ existing FYI import workflow.
 Remote example:
 
 ```bash
-uv run python scripts/scrape_agency_contacts.py --remote --limit 50
+uv run python scripts/scrape_authority_contacts.py --remote --limit 50
 ```
 
 Generated SQL should:
 
-* upsert candidates by `(agency_id, normalized_email, source_url)`
+* upsert candidates by `(authority_id, normalized_email, source_url)`
 * update `last_seen_at` when seen again
 * preserve accepted/rejected status where possible
-* set agency `contact_status = needs_review` only when current status is
+* set authority `contact_status = needs_review` only when current status is
   `missing` or `invalid`
 * never change `primary_request_email` directly
 * never downgrade `verified`
@@ -305,13 +305,13 @@ Generated SQL should:
 
 Admin should support:
 
-* filter agencies by `contact_status = needs_review`
-* show candidate emails on agency detail page
+* filter authorities by `contact_status = needs_review`
+* show candidate emails on authority detail page
 * show evidence URL and confidence reason
 * accept a candidate as primary
 * accept additional candidates as secondary
 * reject candidate
-* mark agency contact invalid if no correct address exists
+* mark authority contact invalid if no correct address exists
 
 Accepting a candidate should:
 
@@ -341,10 +341,10 @@ The scraper must:
 ## First Implementation Slice
 
 1. Add `curl_cffi` and `beautifulsoup4`.
-2. Add D1 migration for `sunlight_agency_contact_candidates`.
+2. Add D1 migration for `sunlight_authority_contact_candidates`.
 3. Add pure Python extraction/scoring helpers with unit tests.
 4. Add scraper CLI with `--write-sql` and `--dry-run`.
-5. Test against 5-10 known agencies.
+5. Test against 5-10 known authorities.
 6. Apply a small remote scrape batch.
-7. Add admin candidate review UI on agency detail pages.
+7. Add admin candidate review UI on authority detail pages.
 8. Only then allow operators to verify contacts for sending.

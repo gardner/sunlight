@@ -4,8 +4,8 @@
   "scripts": {
     "admin:dev": "pnpm --dir apps/admin dev",
     "admin:build": "pnpm --dir apps/admin build",
-    "agency:dev": "pnpm --dir apps/agency dev",
-    "agency:build": "pnpm --dir apps/agency build",
+    "authority:dev": "pnpm --dir apps/authority dev",
+    "authority:build": "pnpm --dir apps/authority build",
     "landing:dev": "pnpm --dir apps/landing dev",
     "landing:build": "pnpm --dir apps/landing build",
     "test:ts": "vitest run"

@@ -15,8 +15,11 @@ class FyiAuthorityImportTests(unittest.TestCase):
     def test_infers_oia_for_ministries(self):
         self.assertEqual(infer_legal_regime({"ministry"}), "OIA")
 
+    def test_infers_oia_for_upstream_departmental_tag(self):
+        self.assertEqual(infer_legal_regime({"departmental_agency"}), "OIA")
+
     def test_sql_escapes_single_quotes(self):
-        self.assertEqual(sql("Bob's agency"), "'Bob''s agency'")
+        self.assertEqual(sql("Bob's authority"), "'Bob''s authority'")
 
     def test_import_rows_are_not_sendable_by_default(self):
         statement = upsert_statement(example_row())
@@ -34,9 +37,9 @@ class FyiAuthorityImportTests(unittest.TestCase):
 
 def example_row():
     return {
-        "Name": "Example Agency",
+        "Name": "Example Authority",
         "Short name": "EA",
-        "URL name": "example_agency",
+        "URL name": "example_authority",
         "Tags": "ministry",
         "Home page": "https://example.govt.nz",
         "Publication scheme": "",

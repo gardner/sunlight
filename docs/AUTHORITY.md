@@ -1,12 +1,12 @@
-# Agency Response App
+# Authority Response App
 
 ## Purpose
 
-The agency response app at
-`https://requests.sunlight.nz/response/{case_token}` gives an agency a simple
+The authority response app at
+`https://requests.sunlight.nz/response/{case_token}` gives an authority a simple
 way to respond to a specific `SunlightRequest`.
 
-It exists because email has practical limits. Agencies can still reply by email,
+It exists because email has practical limits. Authorities can still reply by email,
 but if files are too large or awkward to send, they can upload them through this
 tokenized page.
 
@@ -20,10 +20,10 @@ disclosure request.
 
 Use these terms in code and copy:
 
-* `SunlightRequest`: the request Sunlight sent to the agency.
-* `SunlightResponse`: the agency's response to Sunlight.
-* `DisclosedRequest`: an OIA/LGOIMA request that the agency is disclosing.
-* `DisclosedResponse`: the agency's response to that disclosed OIA/LGOIMA
+* `SunlightRequest`: the request Sunlight sent to the authority.
+* `SunlightResponse`: the authority's response to Sunlight.
+* `DisclosedRequest`: an OIA/LGOIMA request that the authority is disclosing.
+* `DisclosedResponse`: the authority's response to that disclosed OIA/LGOIMA
   request.
 
 Avoid generic names like `Request` and `Response` in this app's domain code
@@ -50,7 +50,7 @@ Recommended token shape:
 
 * at least 128 bits of entropy
 * URL-safe
-* no embedded agency name or cycle date
+* no embedded authority name or cycle date
 * stored hashed in D1 if practical
 
 Example URL:
@@ -59,11 +59,11 @@ Example URL:
 
 ## Page Goals
 
-The page should let an agency:
+The page should let an authority:
 
 * confirm which Sunlight request they are responding to
 * see the request month/date range
-* see the agency name on record
+* see the authority name on record
 * see the reply email address
 * upload large response files
 * add optional notes
@@ -78,19 +78,19 @@ records publishing interface.
 For a valid active token, show:
 
 * Sunlight branding
-* agency name
+* authority name
 * request cycle/month
 * covered date range
 * short summary of what Sunlight requested
 * reply email address
 * upload control
-* optional agency reference field
+* optional authority reference field
 * optional contact name
 * optional contact email
 * optional notes
 * submit button
 
-The copy should make clear that Sunlight is requesting copies of the agency's
+The copy should make clear that Sunlight is requesting copies of the authority's
 OIA/LGOIMA requests and responses for the covered period.
 
 The upload UI should support:
@@ -109,15 +109,15 @@ The app should use direct-to-R2 upload sessions.
 
 Recommended flow:
 
-1. Agency opens tokenized page.
+1. Authority opens tokenized page.
 2. Worker validates `case_token` in D1.
-3. Agency selects files.
+3. Authority selects files.
 4. App requests an upload session from the Worker.
 5. Worker creates an upload record in D1.
 6. Worker returns upload instructions.
 7. Browser uploads file directly to R2.
 8. Worker marks upload complete after browser confirmation or R2 callback/poll.
-9. Agency submits final response notes.
+9. Authority submits final response notes.
 10. Worker creates or updates the `SunlightResponse` record.
 11. App shows confirmation.
 
@@ -168,7 +168,7 @@ the current configured limit.
 
 ## D1 Records
 
-The agency app needs D1 access to:
+The authority app needs D1 access to:
 
 * look up active `SunlightRequest` records by token
 * create upload sessions
@@ -180,8 +180,8 @@ Minimum `SunlightRequest` fields required by this app:
 
 * id
 * case token hash or lookup token
-* agency id
-* agency display name
+* authority id
+* authority display name
 * cycle month
 * covered date range
 * reply email address
@@ -221,7 +221,7 @@ avoid collisions and to support repeated uploads with the same filename.
 ## Response Completion
 
 Uploading files should not automatically mean the response is complete unless
-the agency clicks a final submit button or the upload flow is explicitly
+the authority clicks a final submit button or the upload flow is explicitly
 single-step.
 
 Recommended final submit options:
@@ -258,7 +258,7 @@ Required error states:
 * temporary service error
 
 Unknown token pages should not reveal whether the token was almost valid, expired,
-or associated with another agency.
+or associated with another authority.
 
 ## Security And Abuse Controls
 
@@ -279,9 +279,9 @@ clearly mark material that needs safety review before local processing.
 
 ## Non-Goals
 
-The agency app does not:
+The authority app does not:
 
-* authenticate agency staff
+* authenticate authority staff
 * allow public request submission
 * publish uploaded files
 * parse uploaded documents

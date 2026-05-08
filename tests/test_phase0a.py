@@ -10,23 +10,23 @@ class Phase0ARequestIntakeTests(unittest.TestCase):
         self.store = RequestStore(self.db, alias_domain="reply.sunlight.test")
         self.template_id = self.store.create_template(
             name="Monthly disclosure",
-            subject_template="OIA disclosure request for {agency_name} - {request_month}",
+            subject_template="OIA disclosure request for {authority_name} - {request_month}",
             body_template=(
-                "Kia ora {agency_name},\n\n"
+                "Kia ora {authority_name},\n\n"
                 "Please provide responses for {date_range_covered}.\n"
                 "Reply to {reply_alias}.\n\n"
                 "{sunlight_contact_details}"
             ),
         )
 
-    def test_creates_cycle_cases_for_active_agencies(self):
-        agency_id = self.store.create_agency(
+    def test_creates_cycle_cases_for_active_authorities(self):
+        authority_id = self.store.create_authority(
             name="Ministry of Testing",
             legal_regime="OIA",
             request_email="oia@example.govt.nz",
             template_id=self.template_id,
         )
-        self.store.create_agency(
+        self.store.create_authority(
             name="Dormant Council",
             legal_regime="LGOIMA",
             request_email="info@example.govt.nz",
@@ -45,7 +45,7 @@ class Phase0ARequestIntakeTests(unittest.TestCase):
 
         self.assertEqual(len(cases), 1)
         case = cases[0]
-        self.assertEqual(case.agency_id, agency_id)
+        self.assertEqual(case.authority_id, authority_id)
         self.assertEqual(case.status, "scheduled")
         self.assertRegex(
             case.reply_alias,
@@ -59,9 +59,9 @@ class Phase0ARequestIntakeTests(unittest.TestCase):
         self.assertIn(case.reply_alias, outbound[0].body)
         self.assertEqual(outbound[0].send_status, "queued")
 
-    def test_cycle_approval_is_idempotent_per_agency_and_cycle(self):
-        self.store.create_agency(
-            name="Repeatable Agency",
+    def test_cycle_approval_is_idempotent_per_authority_and_cycle(self):
+        self.store.create_authority(
+            name="Repeatable Authority",
             legal_regime="OIA",
             request_email="oia@example.govt.nz",
             template_id=self.template_id,
@@ -87,8 +87,8 @@ class Phase0ARequestIntakeTests(unittest.TestCase):
         self.assertEqual(len(self.store.outbound_messages_for_cycle(cycle_id)), 1)
 
     def test_preview_does_not_create_cases_or_messages(self):
-        self.store.create_agency(
-            name="Preview Agency",
+        self.store.create_authority(
+            name="Preview Authority",
             legal_regime="OIA",
             request_email="oia@example.govt.nz",
             template_id=self.template_id,
@@ -97,18 +97,18 @@ class Phase0ARequestIntakeTests(unittest.TestCase):
 
         preview = self.store.preview_cycle(cycle_id)
 
-        self.assertEqual([item["agency_name"] for item in preview], ["Preview Agency"])
+        self.assertEqual([item["authority_name"] for item in preview], ["Preview Authority"])
         self.assertEqual(self.store.cases_for_cycle(cycle_id), [])
         self.assertEqual(self.store.outbound_messages_for_cycle(cycle_id), [])
 
     def test_template_render_errors_name_missing_variables(self):
         bad_template_id = self.store.create_template(
             name="Bad",
-            subject_template="Hello {agency_name}",
+            subject_template="Hello {authority_name}",
             body_template="Missing {not_available}",
         )
-        self.store.create_agency(
-            name="Broken Template Agency",
+        self.store.create_authority(
+            name="Broken Template Authority",
             legal_regime="OIA",
             request_email="oia@example.govt.nz",
             template_id=bad_template_id,
@@ -125,8 +125,8 @@ class Phase0ARequestIntakeTests(unittest.TestCase):
             )
 
     def test_approval_writes_audit_events(self):
-        self.store.create_agency(
-            name="Audited Agency",
+        self.store.create_authority(
+            name="Audited Authority",
             legal_regime="OIA",
             request_email="oia@example.govt.nz",
             template_id=self.template_id,

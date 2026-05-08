@@ -2,12 +2,12 @@ const processSteps = [
   {
     marker: "01",
     title: "Request",
-    body: "Sunlight sends recurring OIA and LGOIMA requests to selected public agencies.",
+    body: "Sunlight sends recurring OIA and LGOIMA requests to selected public authorities.",
   },
   {
     marker: "02",
     title: "Receive",
-    body: "Agencies reply by email or use a secure upload link for larger files.",
+    body: "Authorities reply by email or use a secure upload link for larger files.",
   },
   {
     marker: "03",
@@ -27,7 +27,7 @@ const publicValue = [
   "Bringing this material together supports journalism, research, public understanding, and civic technology.",
 ];
 
-const agencyItems = [
+const authorityItems = [
   {
     title: "Reply by email",
     body: "Use the reply address shown in the request email.",
@@ -38,7 +38,7 @@ const agencyItems = [
   },
   {
     title: "No account required",
-    body: "Agency staff do not need to create an account to respond.",
+    body: "Authority staff do not need to create an account to respond.",
   },
   {
     title: "Need to confirm a request is genuine?",
@@ -55,12 +55,12 @@ export default function LandingPage() {
         </a>
         <nav className="nav-links" aria-label="Primary navigation">
           <a href="#about">How it works</a>
-          <a href="#agencies">For agencies</a>
+          <a href="#authorities">For authorities</a>
           <a href="#method">Method</a>
           <a href="#contact">Contact</a>
         </nav>
-        <a className="nav-action" href="#agencies">
-          For agencies
+        <a className="nav-action" href="#authorities">
+          For authorities
         </a>
       </header>
 
@@ -69,7 +69,7 @@ export default function LandingPage() {
           <p className="status-label">Public-interest archive for official information</p>
           <h1>Sunlight</h1>
           <p className="lede">
-            Sunlight collects official information responses from public agencies, preserves them with clear provenance, and prepares them for careful review, search, and reuse.
+            Sunlight collects official information responses from public authorities, preserves them with clear provenance, and prepares them for careful review, search, and reuse.
           </p>
           <p className="context">
             Sunlight is an independent project. It is not a government service, and material sent to Sunlight is not published automatically.
@@ -78,8 +78,8 @@ export default function LandingPage() {
             <a className="button button-primary" href="#about">
               Learn how it works
             </a>
-            <a className="button button-secondary" href="#agencies">
-              For agencies
+            <a className="button button-secondary" href="#authorities">
+              For authorities
             </a>
           </div>
         </div>
@@ -130,16 +130,16 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="agency-panel" id="agencies" aria-labelledby="agency-title">
+      <section className="authority-panel" id="authorities" aria-labelledby="authority-title">
         <div>
-          <p className="kicker">For agencies</p>
-          <h2 id="agency-title">Responding to a Sunlight request</h2>
+          <p className="kicker">For authorities</p>
+          <h2 id="authority-title">Responding to a Sunlight request</h2>
           <p>
-            If your agency has received a request from Sunlight, please use the unique reply address or secure upload link included in that request.
+            If your authority has received a request from Sunlight, please use the unique reply address or secure upload link included in that request.
           </p>
-          <div className="agency-grid">
-            {agencyItems.map((item) => (
-              <article className="agency-item" key={item.title}>
+          <div className="authority-grid">
+            {authorityItems.map((item) => (
+              <article className="authority-item" key={item.title}>
                 <h3>{item.title}</h3>
                 <p>{item.body}</p>
               </article>
@@ -164,12 +164,12 @@ export default function LandingPage() {
           <p className="kicker">Method</p>
           <h2>Requests and responses are tracked separately.</h2>
           <p>
-            Sunlight sends recurring requests to agencies. Agencies then send back the material covered by those requests.
-            To keep the record clear, Sunlight tracks the outgoing request, the agency response, and the preserved material as related but separate records.
+            Sunlight sends recurring requests to authorities. Authorities then send back the material covered by those requests.
+            To keep the record clear, Sunlight tracks the outgoing request, the authority response, and the preserved material as related but separate records.
           </p>
           <div className="flow" aria-label="Collection flow">
             <span>Sunlight request</span>
-            <span>Agency response</span>
+            <span>Authority response</span>
             <span>Preserved material</span>
           </div>
         </article>

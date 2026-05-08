@@ -16,7 +16,7 @@ export interface RequestCycle {
 
 export type RequestCycleStatus = RequestCycle["status"];
 
-export interface SendableAgency {
+export interface SendableAuthority {
   id: string;
   legal_regime: "OIA" | "LGOIMA" | "other";
   name: string;
@@ -33,7 +33,7 @@ export interface SunlightRequestRecord {
 }
 
 export interface CycleSunlightRequest {
-  agency_name: string;
+  authority_name: string;
   expected_due_at: string | null;
   id: string;
   last_sent_at: string | null;
@@ -77,7 +77,7 @@ export function summarizeSunlightRequestStatuses(
 }
 
 export async function buildSunlightRequestRecord(input: {
-  agency: SendableAgency;
+  authority: SendableAuthority;
   cycle: Pick<RequestCycle, "covered_from" | "covered_until" | "cycle_month" | "id">;
   today: string;
   token?: string;
@@ -144,7 +144,7 @@ export async function getCycle(db: D1Database, cycleId: string): Promise<Request
     .first<RequestCycle>();
 }
 
-export async function listSendableAgencies(db: D1Database): Promise<SendableAgency[]> {
+export async function listSendableAuthorities(db: D1Database): Promise<SendableAuthority[]> {
   const result = await db
     .prepare(
       `
@@ -153,7 +153,7 @@ export async function listSendableAgencies(db: D1Database): Promise<SendableAgen
           name,
           legal_regime,
           default_template_id AS template_id
-        FROM sunlight_agencies
+        FROM sunlight_authorities
         WHERE status = 'active'
           AND contact_status = 'verified'
           AND primary_request_email IS NOT NULL
@@ -161,7 +161,7 @@ export async function listSendableAgencies(db: D1Database): Promise<SendableAgen
         ORDER BY name
       `,
     )
-    .all<SendableAgency>();
+    .all<SendableAuthority>();
 
   return result.results;
 }
@@ -180,12 +180,12 @@ export async function listCycleSunlightRequests(
           sunlight_requests.status,
           sunlight_requests.expected_due_at,
           sunlight_requests.last_sent_at,
-          sunlight_agencies.name AS agency_name,
-          sunlight_agencies.primary_request_email
+          sunlight_authorities.name AS authority_name,
+          sunlight_authorities.primary_request_email
         FROM sunlight_requests
-        JOIN sunlight_agencies ON sunlight_agencies.id = sunlight_requests.agency_id
+        JOIN sunlight_authorities ON sunlight_authorities.id = sunlight_requests.authority_id
         WHERE sunlight_requests.cycle_id = ?
-        ORDER BY sunlight_agencies.name
+        ORDER BY sunlight_authorities.name
       `,
     )
     .bind(cycleId)
@@ -200,18 +200,18 @@ export async function prepareCycleRequests(db: D1Database, cycleId: string): Pro
     throw new Error("Unknown request cycle");
   }
 
-  const agencies = await listSendableAgencies(db);
+  const authorities = await listSendableAuthorities(db);
   const today = new Date().toISOString().slice(0, 10);
   let created = 0;
 
-  for (const agency of agencies) {
-    const record = await buildSunlightRequestRecord({ agency, cycle, today });
+  for (const authority of authorities) {
+    const record = await buildSunlightRequestRecord({ authority, cycle, today });
     const result = await db
       .prepare(
         `
           INSERT OR IGNORE INTO sunlight_requests (
             id,
-            agency_id,
+            authority_id,
             cycle_id,
             template_id,
             case_token_hash,
@@ -225,9 +225,9 @@ export async function prepareCycleRequests(db: D1Database, cycleId: string): Pro
       )
       .bind(
         record.id,
-        agency.id,
+        authority.id,
         cycle.id,
-        agency.template_id,
+        authority.template_id,
         record.caseTokenHash,
         record.caseTokenHint,
         record.replyEmail,

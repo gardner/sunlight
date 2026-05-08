@@ -7,12 +7,12 @@ export interface SummaryItem {
 
 const STATIC_SUMMARY_QUERIES = [
   {
-    label: "Agencies",
-    sql: "SELECT COUNT(*) AS count FROM sunlight_agencies",
+    label: "Authorities",
+    sql: "SELECT COUNT(*) AS count FROM sunlight_authorities",
   },
   {
     label: "Verified contacts",
-    sql: "SELECT COUNT(*) AS count FROM sunlight_agencies WHERE contact_status = 'verified'",
+    sql: "SELECT COUNT(*) AS count FROM sunlight_authorities WHERE contact_status = 'verified'",
   },
   {
     label: "Request cycles",

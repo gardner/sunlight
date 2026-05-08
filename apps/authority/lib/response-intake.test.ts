@@ -7,17 +7,17 @@ import {
 } from "./response-intake";
 
 describe("buildResponseSubmission", () => {
-  it("trims optional agency metadata", () => {
+  it("trims optional authority metadata", () => {
     expect(
       buildResponseSubmission({
-        agencyReference: "  OIA-2026-10  ",
+        authorityReference: "  OIA-2026-10  ",
         category: "full_response",
         notes: "  Attached documents  ",
         submitterEmail: "  records@example.govt.nz  ",
         submitterName: "  Records Team  ",
       }),
     ).toEqual({
-      agencyReference: "OIA-2026-10",
+      authorityReference: "OIA-2026-10",
       category: "full_response",
       notes: "Attached documents",
       submitterEmail: "records@example.govt.nz",

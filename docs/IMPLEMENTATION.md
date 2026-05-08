@@ -6,12 +6,12 @@ Build the first Cloudflare-backed vertical slice for Sunlight Requests:
 
 * D1 stores operational metadata and state.
 * R2 stores raw artifacts and uploaded files.
-* Vinext apps provide admin, agency-response, and public landing experiences.
+* Vinext apps provide admin, authority-response, and public landing experiences.
 * Cloudflare Email Sending and Email Routing handle request email delivery and
-  inbound agency replies.
+  inbound authority replies.
 
 Phase 0 implementation should collect, preserve, and track Sunlight's own
-recurring disclosure requests and agency replies. It should not parse or publish
+recurring disclosure requests and authority replies. It should not parse or publish
 the underlying OIA/LGOIMA material yet.
 
 ## Cloudflare Resources
@@ -21,7 +21,7 @@ Use these resource names:
 * D1 database: `sunlight-requests`
 * R2 bucket: `sunlight-request-artifacts`
 * admin app domain: `admin.sunlight.nz`
-* agency app domain: `requests.sunlight.nz`
+* authority app domain: `requests.sunlight.nz`
 * landing app domains: `sunlight.nz`, `www.sunlight.nz`
 * inbound reply address format: `reply-{case_token}@sunlight.nz`
 
@@ -46,10 +46,10 @@ Worker secrets and variables:
 * `R2_ACCOUNT_ID`: Cloudflare account id used to build R2 S3 presigned URLs.
 * `R2_ACCESS_KEY_ID`: R2 S3 API access key id for presigned uploads.
 * `R2_SECRET_ACCESS_KEY`: R2 S3 API secret access key for presigned uploads.
-* `R2_BUCKET_NAME`: R2 bucket name. Defaults in agency Wrangler config to
+* `R2_BUCKET_NAME`: R2 bucket name. Defaults in authority Wrangler config to
   `sunlight-request-artifacts`.
 * `R2_PRESIGN_EXPIRES_SECONDS`: presigned upload URL lifetime. Defaults in
-  agency Wrangler config to `900`.
+  authority Wrangler config to `900`.
 
 The admin Worker has a Cloudflare Email Sending binding named `EMAIL`. Its
 Wrangler config restricts senders to `requests@sunlight.nz`; dynamic reply
@@ -62,7 +62,7 @@ Target layout:
 ```text
 apps/
   admin/
-  agency/
+  authority/
   landing/
 cloudflare/
   migrations/
@@ -76,7 +76,7 @@ wrangler.jsonc
 
 `apps/admin` owns internal operations.
 
-`apps/agency` owns the tokenized response page at
+`apps/authority` owns the tokenized response page at
 `https://requests.sunlight.nz/response/{case_token}`.
 
 `apps/landing` owns the public Sunlight landing site.
@@ -96,10 +96,10 @@ it at previous `dist` output causes recursive build failures.
 
 ```bash
 pnpm admin:build
-pnpm agency:build
+pnpm authority:build
 pnpm landing:build
 pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --config apps/admin/wrangler.jsonc
-pnpm exec wrangler deploy apps/agency/dist/server/ssr/index.js --assets apps/agency/dist/client --config apps/agency/wrangler.jsonc
+pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --config apps/authority/wrangler.jsonc
 pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
 ```
 
@@ -107,7 +107,7 @@ Dry-run deployment checks:
 
 ```bash
 pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
-pnpm exec wrangler deploy apps/agency/dist/server/ssr/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
+pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --dry-run --config apps/authority/wrangler.jsonc
 pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
 ```
 
@@ -124,13 +124,13 @@ Acceptance criteria:
 * Wrangler config binds D1 and R2.
 * Initial D1 migration creates core admin tables.
 * Bootstrap admin `sunlight@spunts.net` is seeded as `maintainer`.
-* Agency seed import can load FYI authorities without making them sendable.
+* Authority seed import can load FYI authorities without making them sendable.
 * Hooks enforce McCabe complexity and max source file length.
 
 Tables in the first migration:
 
 * `admin_users`
-* `sunlight_agencies`
+* `sunlight_authorities`
 * `sunlight_request_templates`
 * `sunlight_request_cycles`
 * `sunlight_requests`
@@ -149,24 +149,24 @@ Status: complete.
 
 Acceptance criteria:
 
-* Admin can view agencies.
-* Admin can mark an agency contact verified.
+* Admin can view authorities.
+* Admin can mark an authority contact verified.
 * Admin can create a request template.
 * Admin can create a monthly request cycle.
-* System previews sendable agencies.
+* System previews sendable authorities.
 * System creates `SunlightRequest` records with:
   * case token hash
   * token hint
   * reply email
-  * agency response URL
+  * authority response URL
   * expected due date
 
 No real email needs to be sent in this milestone.
 
 Implemented admin screens:
 
-* `/agencies`
-* `/agencies/{agency_id}`
+* `/authorities`
+* `/authorities/{authority_id}`
 * `/templates`
 * `/templates/new`
 * `/cycles`
@@ -175,10 +175,10 @@ Implemented admin screens:
 
 Sendability currently requires:
 
-* `sunlight_agencies.status = 'active'`
-* `sunlight_agencies.contact_status = 'verified'`
-* `sunlight_agencies.primary_request_email IS NOT NULL`
-* `sunlight_agencies.default_template_id IS NOT NULL`
+* `sunlight_authorities.status = 'active'`
+* `sunlight_authorities.contact_status = 'verified'`
+* `sunlight_authorities.primary_request_email IS NOT NULL`
+* `sunlight_authorities.default_template_id IS NOT NULL`
 
 Due dates are calculated as 20 working days after preparation, skipping
 weekends. Public-holiday support is available in the pure helper, but no
@@ -216,23 +216,23 @@ Remaining:
 
 * Configure Cloudflare Email Sending domain prerequisites in the dashboard if
   the account still requires them.
-* Send a controlled live test to a verified address before sending to agencies.
-* Add a controlled live send test before any real agency batch.
+* Send a controlled live test to a verified address before sending to authorities.
+* Add a controlled live send test before any real authority batch.
 * Store provider message IDs if Cloudflare Email Sending exposes them in the
   binding result.
 
 ## Fourth Milestone
 
-The fourth milestone is agency response intake.
+The fourth milestone is authority response intake.
 
 Status: started.
 
 Acceptance criteria:
 
 * `requests.sunlight.nz/response/{case_token}` returns 404 for invalid tokens.
-* Valid tokens show the agency response page.
-* Agencies can submit response metadata.
-* Agencies can upload files to R2.
+* Valid tokens show the authority response page.
+* Authorities can submit response metadata.
+* Authorities can upload files to R2.
 * Upload metadata is recorded in D1.
 * A `SunlightResponse` record is created or updated.
 
@@ -240,9 +240,9 @@ Implemented:
 
 * Invalid `case_token` returns a 404.
 * Valid `case_token` resolves by SHA-256 token hash.
-* Valid response page shows agency, cycle period, reply email, and upload
+* Valid response page shows authority, cycle period, reply email, and upload
   form.
-* Agencies can submit response metadata.
+* Authorities can submit response metadata.
 * Upload session route creates D1 upload session and upload rows.
 * Upload route returns direct-to-R2 presigned `PUT` URLs.
 * Upload completion route verifies the object exists in R2 and marks D1 upload
@@ -252,7 +252,7 @@ Implemented:
 Remaining:
 
 * Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` for
-  the deployed agency Worker.
+  the deployed authority Worker.
 * Add multipart upload support for files that need resumability or exceed the
   single-`PUT` operating limit.
 * Add clearer per-file retry/remove controls.
@@ -293,10 +293,10 @@ uv run python -m unittest discover -s tests
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm admin:build
-pnpm agency:build
+pnpm authority:build
 pnpm landing:build
 pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
-pnpm exec wrangler deploy apps/agency/dist/server/ssr/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
+pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --dry-run --config apps/authority/wrangler.jsonc
 pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
 ```
 

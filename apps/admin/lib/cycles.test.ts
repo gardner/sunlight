@@ -23,7 +23,7 @@ describe("buildCycleRange", () => {
 describe("buildSunlightRequestRecord", () => {
   it("builds request token fields and due date", async () => {
     const record = await buildSunlightRequestRecord({
-      agency: {
+      authority: {
         id: "agy_1",
         legal_regime: "OIA",
         name: "The Treasury",

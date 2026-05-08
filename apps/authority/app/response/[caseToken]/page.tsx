@@ -21,7 +21,7 @@ export default async function ResponsePage({ params, searchParams }: ResponsePag
   return (
     <main className="shell">
       <p className="eyebrow">Sunlight Request</p>
-      <h1>{request.agency_name}</h1>
+      <h1>{request.authority_name}</h1>
       <dl>
         <div>
           <dt>Cycle</dt>
@@ -59,8 +59,8 @@ export default async function ResponsePage({ params, searchParams }: ResponsePag
             </select>
           </label>
           <label>
-            Agency reference
-            <input name="agencyReference" />
+            Authority reference
+            <input name="authorityReference" />
           </label>
           <label>
             Contact name

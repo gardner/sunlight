@@ -4,8 +4,8 @@ const DEFAULT_FROM_EMAIL = "requests@sunlight.nz";
 const DEFAULT_CONTACT_DETAILS = "Sunlight, sunlight@sunlight.nz";
 
 export interface PreparedSunlightRequest {
-  agency_id: string;
-  agency_name: string;
+  authority_id: string;
+  authority_name: string;
   body_template: string;
   case_token_hint: string;
   cycle_id: string;
@@ -23,7 +23,7 @@ export interface PreparedSunlightRequest {
 }
 
 export interface OutboundEmailLog {
-  agency_name: string;
+  authority_name: string;
   error_message: string | null;
   id: string;
   sent_at: string | null;
@@ -63,7 +63,7 @@ export function renderSunlightRequestEmail(
   } = {},
 ): RenderedSunlightRequestEmail {
   const variables: TemplateVariables = {
-    agency_name: request.agency_name,
+    authority_name: request.authority_name,
     covered_date_range: `${request.covered_from} to ${request.covered_until}`,
     cycle_month: request.cycle_month,
     legal_regime: request.legal_regime,
@@ -127,23 +127,23 @@ export async function listPreparedSunlightRequests(
           sunlight_requests.response_url,
           sunlight_requests.cycle_id,
           sunlight_requests.template_id,
-          sunlight_agencies.id AS agency_id,
-          sunlight_agencies.name AS agency_name,
-          sunlight_agencies.legal_regime,
-          sunlight_agencies.primary_request_email,
+          sunlight_authorities.id AS authority_id,
+          sunlight_authorities.name AS authority_name,
+          sunlight_authorities.legal_regime,
+          sunlight_authorities.primary_request_email,
           sunlight_request_cycles.cycle_month,
           sunlight_request_cycles.covered_from,
           sunlight_request_cycles.covered_until,
           sunlight_request_templates.subject_template,
           sunlight_request_templates.body_template
         FROM sunlight_requests
-        JOIN sunlight_agencies ON sunlight_agencies.id = sunlight_requests.agency_id
+        JOIN sunlight_authorities ON sunlight_authorities.id = sunlight_requests.authority_id
         JOIN sunlight_request_cycles ON sunlight_request_cycles.id = sunlight_requests.cycle_id
         JOIN sunlight_request_templates ON sunlight_request_templates.id = sunlight_requests.template_id
         WHERE sunlight_requests.cycle_id = ?
           AND sunlight_requests.status IN ('scheduled', 'queued', 'failed')
-          AND sunlight_agencies.primary_request_email IS NOT NULL
-        ORDER BY sunlight_agencies.name
+          AND sunlight_authorities.primary_request_email IS NOT NULL
+        ORDER BY sunlight_authorities.name
       `,
     )
     .bind(cycleId)
@@ -166,12 +166,12 @@ export async function listCycleOutboundEmails(
           sunlight_outbound_emails.status,
           sunlight_outbound_emails.sent_at,
           sunlight_outbound_emails.error_message,
-          sunlight_agencies.name AS agency_name
+          sunlight_authorities.name AS authority_name
         FROM sunlight_outbound_emails
         JOIN sunlight_requests
           ON sunlight_requests.id = sunlight_outbound_emails.sunlight_request_id
-        JOIN sunlight_agencies
-          ON sunlight_agencies.id = sunlight_requests.agency_id
+        JOIN sunlight_authorities
+          ON sunlight_authorities.id = sunlight_requests.authority_id
         WHERE sunlight_requests.cycle_id = ?
         ORDER BY sunlight_outbound_emails.created_at DESC
       `,

@@ -16,9 +16,9 @@ const RESPONSE_CATEGORIES = new Set([
   "unknown",
 ]);
 
-export interface AgencySunlightRequest {
-  agency_id: string;
-  agency_name: string;
+export interface AuthoritySunlightRequest {
+  authority_id: string;
+  authority_name: string;
   case_token_hint: string;
   closed_at: string | null;
   covered_from: string;
@@ -30,7 +30,7 @@ export interface AgencySunlightRequest {
 }
 
 export interface ResponseSubmission {
-  agencyReference: string | null;
+  authorityReference: string | null;
   category: string;
   notes: string | null;
   submitterEmail: string | null;
@@ -61,7 +61,7 @@ export interface CreatedUpload {
 }
 
 export function buildResponseSubmission(input: {
-  agencyReference?: FormDataEntryValue | null;
+  authorityReference?: FormDataEntryValue | null;
   category?: FormDataEntryValue | null;
   notes?: FormDataEntryValue | null;
   submitterEmail?: FormDataEntryValue | null;
@@ -73,7 +73,7 @@ export function buildResponseSubmission(input: {
   }
 
   return {
-    agencyReference: nullableText(input.agencyReference),
+    authorityReference: nullableText(input.authorityReference),
     category,
     notes: nullableText(input.notes),
     submitterEmail: nullableText(input.submitterEmail),
@@ -134,36 +134,36 @@ export function sanitizeFilename(filename: string): string {
 export async function getSunlightRequestByToken(
   db: D1Database,
   caseToken: string,
-): Promise<AgencySunlightRequest | null> {
+): Promise<AuthoritySunlightRequest | null> {
   const tokenHash = await sha256Hex(caseToken);
   return db
     .prepare(
       `
         SELECT
           sunlight_requests.id,
-          sunlight_requests.agency_id,
+          sunlight_requests.authority_id,
           sunlight_requests.case_token_hint,
           sunlight_requests.reply_email,
           sunlight_requests.status,
           sunlight_requests.closed_at,
-          sunlight_agencies.name AS agency_name,
+          sunlight_authorities.name AS authority_name,
           sunlight_request_cycles.cycle_month,
           sunlight_request_cycles.covered_from,
           sunlight_request_cycles.covered_until
         FROM sunlight_requests
-        JOIN sunlight_agencies ON sunlight_agencies.id = sunlight_requests.agency_id
+        JOIN sunlight_authorities ON sunlight_authorities.id = sunlight_requests.authority_id
         JOIN sunlight_request_cycles ON sunlight_request_cycles.id = sunlight_requests.cycle_id
         WHERE sunlight_requests.case_token_hash = ?
         LIMIT 1
       `,
     )
     .bind(tokenHash)
-    .first<AgencySunlightRequest>();
+    .first<AuthoritySunlightRequest>();
 }
 
 export async function submitSunlightResponse(
   db: D1Database,
-  request: AgencySunlightRequest,
+  request: AuthoritySunlightRequest,
   submission: ResponseSubmission,
 ): Promise<string> {
   const existing = await db
@@ -211,7 +211,7 @@ export async function submitSunlightResponse(
 
 export async function createUpload(
   db: D1Database,
-  request: AgencySunlightRequest,
+  request: AuthoritySunlightRequest,
   upload: BrowserUploadRequest,
   config: R2PresignConfig,
 ): Promise<CreatedUpload> {
@@ -289,7 +289,7 @@ export async function createUpload(
 export async function completeUpload(
   db: D1Database,
   bucket: R2Bucket,
-  request: AgencySunlightRequest,
+  request: AuthoritySunlightRequest,
   uploadId: string,
 ): Promise<void> {
   const upload = await db
@@ -364,7 +364,7 @@ function requestStatusForCategory(category: string): string {
 async function insertSunlightResponse(
   db: D1Database,
   responseId: string,
-  request: AgencySunlightRequest,
+  request: AuthoritySunlightRequest,
   submission: ResponseSubmission,
 ): Promise<void> {
   await db
@@ -373,12 +373,12 @@ async function insertSunlightResponse(
         INSERT INTO sunlight_responses (
           id,
           sunlight_request_id,
-          agency_id,
+          authority_id,
           channel,
           category,
           status,
           received_at,
-          agency_reference,
+          authority_reference,
           submitter_name,
           submitter_email,
           notes
@@ -388,9 +388,9 @@ async function insertSunlightResponse(
     .bind(
       responseId,
       request.id,
-      request.agency_id,
+      request.authority_id,
       submission.category,
-      submission.agencyReference,
+      submission.authorityReference,
       submission.submitterName,
       submission.submitterEmail,
       submission.notes,
@@ -409,7 +409,7 @@ async function updateSunlightResponse(
         UPDATE sunlight_responses
         SET category = ?,
             received_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-            agency_reference = ?,
+            authority_reference = ?,
             submitter_name = ?,
             submitter_email = ?,
             notes = ?,
@@ -419,7 +419,7 @@ async function updateSunlightResponse(
     )
     .bind(
       submission.category,
-      submission.agencyReference,
+      submission.authorityReference,
       submission.submitterName,
       submission.submitterEmail,
       submission.notes,
@@ -473,7 +473,7 @@ async function insertAuditEvent(
           actor_type,
           actor_id,
           metadata_json
-        ) VALUES (?, 'sunlight_request', ?, ?, 'agency_token', NULL, ?)
+        ) VALUES (?, 'sunlight_request', ?, ?, 'authority_token', NULL, ?)
       `,
     )
     .bind(

@@ -12,7 +12,7 @@ import {
 import { getAdminSummary } from "../lib/data";
 
 const navItems = [
-  { href: "/agencies", label: "Agencies", icon: Building2 },
+  { href: "/authorities", label: "Authorities", icon: Building2 },
   { href: "/templates", label: "Templates", icon: FileText },
   { href: "/cycles", label: "Cycles", icon: Repeat },
   { href: "/requests", label: "Requests", icon: Send },
@@ -31,7 +31,7 @@ export default async function AdminDashboard() {
           </div>
           <h1>Operations dashboard</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Track agency coverage, request cycles, outbound email state, and
+            Track authority coverage, request cycles, outbound email state, and
             overdue SunlightRequests from one operational surface.
           </p>
         </div>
@@ -78,7 +78,7 @@ export default async function AdminDashboard() {
               </a>
             </Button>
             <Button asChild variant="secondary">
-              <a href="/agencies">Review agencies</a>
+              <a href="/authorities">Review authorities</a>
             </Button>
             <Button asChild variant="secondary">
               <a href="/requests">Check overdue</a>
@@ -93,7 +93,7 @@ export default async function AdminDashboard() {
             </CardTitle>
             <CardDescription>
               Run a controlled live Email Sending test before sending a full
-              agency cycle.
+              authority cycle.
             </CardDescription>
           </CardHeader>
         </Card>

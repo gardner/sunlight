@@ -205,7 +205,7 @@ p {
 .section-heading,
 .process-grid,
 .split-section,
-.agency-panel,
+.authority-panel,
 .method-trust,
 .site-footer {
   margin-left: auto;
@@ -282,7 +282,7 @@ p {
   margin: 0;
 }
 
-.agency-panel {
+.authority-panel {
   align-items: center;
   background: #003434;
   border-radius: 8px;
@@ -294,36 +294,36 @@ p {
   padding: 52px;
 }
 
-.agency-panel h2,
-.agency-panel h3,
-.agency-panel p,
-.agency-panel .kicker {
+.authority-panel h2,
+.authority-panel h3,
+.authority-panel p,
+.authority-panel .kicker {
   color: #ffffff;
 }
 
-.agency-panel p {
+.authority-panel p {
   max-width: 680px;
 }
 
-.agency-grid {
+.authority-grid {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 30px;
 }
 
-.agency-item {
+.authority-item {
   border: 1px solid rgba(176, 238, 237, 0.32);
   border-radius: 6px;
   padding: 18px;
 }
 
-.agency-item h3 {
+.authority-item h3 {
   font-size: 17px;
   margin-bottom: 6px;
 }
 
-.agency-item p {
+.authority-item p {
   font-size: 15px;
   line-height: 1.5;
   margin: 0;
@@ -470,7 +470,7 @@ p {
 
   .hero,
   .split-section,
-  .agency-panel,
+  .authority-panel,
   .method-trust {
     grid-template-columns: 1fr;
   }
@@ -482,7 +482,7 @@ p {
   }
 
   .process-grid,
-  .agency-grid {
+  .authority-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -539,7 +539,7 @@ p {
   }
 
   .process-grid,
-  .agency-grid {
+  .authority-grid {
     grid-template-columns: 1fr;
   }
 
@@ -548,7 +548,7 @@ p {
     border-top: 1px solid #d9dfdf;
   }
 
-  .agency-panel {
+  .authority-panel {
     border-radius: 0;
     margin-bottom: 64px;
     padding: 36px 22px;

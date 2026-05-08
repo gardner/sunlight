@@ -1,28 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildAllAgenciesQuery,
-  buildAgencyListQuery,
-  buildAgencyWhereClause,
+  buildAllAuthoritiesQuery,
+  buildAuthorityListQuery,
+  buildAuthorityWhereClause,
   buildAssignTemplateUpdate,
   buildVerifyContactUpdate,
-  normalizeAgencyFilters,
-} from "./agencies";
+  normalizeAuthorityFilters,
+} from "./authorities";
 
-describe("normalizeAgencyFilters", () => {
+describe("normalizeAuthorityFilters", () => {
   it("keeps only known contact statuses", () => {
-    expect(normalizeAgencyFilters({ contactStatus: "verified" })).toEqual({
+    expect(normalizeAuthorityFilters({ contactStatus: "verified" })).toEqual({
       contactStatus: "verified",
       page: 1,
       pageSize: 50,
     });
-    expect(normalizeAgencyFilters({ contactStatus: "bogus" })).toEqual({
+    expect(normalizeAuthorityFilters({ contactStatus: "bogus" })).toEqual({
       page: 1,
       pageSize: 50,
     });
   });
 
   it("trims search text", () => {
-    expect(normalizeAgencyFilters({ search: "  treasury  " })).toEqual({
+    expect(normalizeAuthorityFilters({ search: "  treasury  " })).toEqual({
       page: 1,
       pageSize: 50,
       search: "treasury",
@@ -30,20 +30,20 @@ describe("normalizeAgencyFilters", () => {
   });
 
   it("normalizes pagination bounds", () => {
-    expect(normalizeAgencyFilters({ page: "3", pageSize: "100" })).toMatchObject({
+    expect(normalizeAuthorityFilters({ page: "3", pageSize: "100" })).toMatchObject({
       page: 3,
       pageSize: 100,
     });
-    expect(normalizeAgencyFilters({ page: "-1", pageSize: "999" })).toMatchObject({
+    expect(normalizeAuthorityFilters({ page: "-1", pageSize: "999" })).toMatchObject({
       page: 1,
       pageSize: 50,
     });
   });
 });
 
-describe("buildAgencyListQuery", () => {
+describe("buildAuthorityListQuery", () => {
   it("filters by contact status and active state", () => {
-    const query = buildAgencyListQuery({
+    const query = buildAuthorityListQuery({
       contactStatus: "missing",
       status: "active",
     });
@@ -55,7 +55,7 @@ describe("buildAgencyListQuery", () => {
   });
 
   it("searches name and slug", () => {
-    const query = buildAgencyListQuery({ page: 2, pageSize: 25, search: "health" });
+    const query = buildAuthorityListQuery({ page: 2, pageSize: 25, search: "health" });
 
     expect(query.sql).toContain("lower(name) LIKE ?");
     expect(query.sql).toContain("lower(slug) LIKE ?");
@@ -63,19 +63,19 @@ describe("buildAgencyListQuery", () => {
   });
 });
 
-describe("buildAllAgenciesQuery", () => {
+describe("buildAllAuthoritiesQuery", () => {
   it("returns the browser list without pagination", () => {
-    const query = buildAllAgenciesQuery();
+    const query = buildAllAuthoritiesQuery();
 
-    expect(query.sql).toContain("FROM sunlight_agencies");
+    expect(query.sql).toContain("FROM sunlight_authorities");
     expect(query.sql).not.toContain("LIMIT");
     expect(query.bindings).toEqual([]);
   });
 });
 
-describe("buildAgencyWhereClause", () => {
+describe("buildAuthorityWhereClause", () => {
   it("builds a reusable count/list predicate", () => {
-    const clause = buildAgencyWhereClause({
+    const clause = buildAuthorityWhereClause({
       contactStatus: "verified",
       search: "council",
       status: "active",
@@ -92,7 +92,7 @@ describe("buildAgencyWhereClause", () => {
 describe("buildVerifyContactUpdate", () => {
   it("sets a verified primary email", () => {
     const query = buildVerifyContactUpdate({
-      agencyId: "agy_1",
+      authorityId: "agy_1",
       email: " OIA@Example.govt.nz ",
     });
 
@@ -103,7 +103,7 @@ describe("buildVerifyContactUpdate", () => {
   it("rejects invalid email values", () => {
     expect(() =>
       buildVerifyContactUpdate({
-        agencyId: "agy_1",
+        authorityId: "agy_1",
         email: "not-an-email",
       }),
     ).toThrow("valid email");
@@ -111,9 +111,9 @@ describe("buildVerifyContactUpdate", () => {
 });
 
 describe("buildAssignTemplateUpdate", () => {
-  it("sets an agency default template", () => {
+  it("sets an authority default template", () => {
     const query = buildAssignTemplateUpdate({
-      agencyId: "agy_1",
+      authorityId: "agy_1",
       templateId: "tpl_1",
     });
 

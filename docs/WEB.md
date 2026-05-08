@@ -70,13 +70,13 @@ The landing page should support these audiences:
 
 * members of the public who want to understand the project
 * journalists, researchers, and civic technologists
-* agency staff who received a SunlightRequest
+* authority staff who received a SunlightRequest
 * potential supporters or collaborators
 
 Recommended top navigation:
 
 * About
-* For agencies
+* For authorities
 * Method
 * Contact
 
@@ -85,17 +85,17 @@ Primary page sections:
 1. Header
    * Sunlight wordmark or text identity
    * concise navigation
-   * clear agency path
+   * clear authority path
 
 2. Hero
    * project name as the headline
    * one-sentence explanation
-   * primary call to action for agency staff
+   * primary call to action for authority staff
    * secondary call to action for public readers
    * no claim that the archive is already publicly searchable
 
 3. What Sunlight Does
-   * sends recurring OIA/LGOIMA requests to agencies
+   * sends recurring OIA/LGOIMA requests to authorities
    * receives request and response material
    * preserves files and metadata with provenance
    * prepares material for later review, search, and reuse
@@ -106,8 +106,8 @@ Primary page sections:
    * preserved material can support journalism, research, civic technology, and
      accountability
 
-5. For Agencies
-   * explain that agencies respond using the unique link or reply email they
+5. For Authorities
+   * explain that authorities respond using the unique link or reply email they
      received
    * explain that no account is required
    * explain that large files can be uploaded through the unique response link
@@ -116,7 +116,7 @@ Primary page sections:
 6. Method
    * explain collection, preservation, operator review, and future processing
    * distinguish Sunlight's own requests from the OIA/LGOIMA request material
-     disclosed by agencies
+     disclosed by authorities
    * avoid exposing internal implementation details unless useful to establish
      trust
 
@@ -140,7 +140,7 @@ information disclosure material so it can be reviewed, searched, and reused
 responsibly by future public-interest tools.
 
 Use `SunlightRequest` only where the distinction is useful. In public copy,
-prefer phrases such as "a request from Sunlight" and "the material agencies
+prefer phrases such as "a request from Sunlight" and "the material authorities
 disclose in response".
 
 Avoid overpromising:
@@ -148,7 +148,7 @@ Avoid overpromising:
 * do not imply public search is live
 * do not imply all received material is automatically published
 * do not imply Sunlight is a government service
-* do not imply agencies can upload files from the public homepage
+* do not imply authorities can upload files from the public homepage
 
 ## Prompt For Design Tools
 
@@ -157,10 +157,10 @@ Use this prompt in Stitch and Claude Design:
 ```text
 Design a polished public landing page for Sunlight, an independent New Zealand
 public-interest project that collects and preserves official information
-disclosure material from government agencies.
+disclosure material from government authorities.
 
-Sunlight sends recurring OIA/LGOIMA requests to agencies asking for the OIA and
-LGOIMA requests and responses they received during a defined period. Agencies
+Sunlight sends recurring OIA/LGOIMA requests to authorities asking for the OIA and
+LGOIMA requests and responses they received during a defined period. Authorities
 respond by email or by using a unique upload link for large files. Sunlight
 preserves the raw emails, files, metadata, and provenance so the material can be
 reviewed, searched, and reused responsibly by future public-interest tools.
@@ -188,21 +188,21 @@ Information architecture:
 
 Header:
 - Sunlight identity
-- Navigation: About, For agencies, Method, Contact
-- A clear path for agency staff who received a request
+- Navigation: About, For authorities, Method, Contact
+- A clear path for authority staff who received a request
 
 Hero:
 - Headline: Sunlight
 - Supporting copy explaining that Sunlight collects and preserves official
   information disclosure material for future public-interest review, search,
   and reuse
-- Primary CTA: For agencies
+- Primary CTA: For authorities
 - Secondary CTA: How it works
 - Make clear this is an independent project, not a government service
 
 What Sunlight does:
-- Sends recurring OIA/LGOIMA requests to selected agencies
-- Receives agency request and response material
+- Sends recurring OIA/LGOIMA requests to selected authorities
+- Receives authority request and response material
 - Preserves files and metadata with provenance
 - Prepares material for later review, search, and responsible reuse
 
@@ -212,17 +212,17 @@ Why it matters:
 - Preserved material can support journalism, research, civic technology, and
   accountability
 
-For agencies:
-- Agencies respond using the unique link or reply email in the request they
+For authorities:
+- Authorities respond using the unique link or reply email in the request they
   received
 - No account is required
 - Large files can be uploaded through the unique response link
-- Agencies can contact Sunlight to verify a request
+- Authorities can contact Sunlight to verify a request
 
 Method:
 - Explain collection, preservation, operator review, and future processing
 - Clearly distinguish Sunlight's own requests from the OIA/LGOIMA material that
-  agencies disclose in response
+  authorities disclose in response
 - Do not imply that all received material is automatically published
 
 Trust and handling:
@@ -241,7 +241,7 @@ Design requirements:
 - Build the actual landing page experience, not a marketing splash page
 - The first viewport must make the Sunlight name and purpose clear
 - The hero should leave a hint of the next section visible on desktop and mobile
-- Keep agency instructions easy to scan
+- Keep authority instructions easy to scan
 - Use clear section rhythm, strong typography, and practical responsive layout
 - Avoid nested cards, heavy illustration, dark atmospheric imagery, and vague
   decorative UI
@@ -255,7 +255,7 @@ When comparing generated designs, prefer the direction that:
 
 * makes the project purpose immediately clear
 * feels independent but institutionally credible
-* gives agency staff a clear and calm path
+* gives authority staff a clear and calm path
 * explains project status without overpromising
 * has accessible contrast and readable typography
 * can be implemented cleanly in the existing Vinext landing app

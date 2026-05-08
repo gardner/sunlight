@@ -21,7 +21,7 @@ export async function submitResponseAction(formData: FormData) {
     cloudflareEnv.DB,
     request,
     buildResponseSubmission({
-      agencyReference: formData.get("agencyReference"),
+      authorityReference: formData.get("authorityReference"),
       category: formData.get("category"),
       notes: formData.get("notes"),
       submitterEmail: formData.get("submitterEmail"),

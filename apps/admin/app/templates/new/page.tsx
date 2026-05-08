@@ -23,7 +23,7 @@ export default function NewTemplatePage() {
           <input
             name="subjectTemplate"
             required
-            defaultValue="OIA/LGOIMA disclosure request for {agency_name} - {cycle_month}"
+            defaultValue="OIA/LGOIMA disclosure request for {authority_name} - {cycle_month}"
           />
         </label>
         <label>
@@ -32,9 +32,9 @@ export default function NewTemplatePage() {
             name="bodyTemplate"
             required
             rows={12}
-            defaultValue={`Kia ora {agency_name},
+            defaultValue={`Kia ora {authority_name},
 
-Sunlight is requesting copies of OIA/LGOIMA requests received by your agency for {covered_date_range}, and the corresponding responses.
+Sunlight is requesting copies of OIA/LGOIMA requests received by your authority for {covered_date_range}, and the corresponding responses.
 
 Please reply to {reply_email}. If attachments are too large for email, use {response_url}.
 

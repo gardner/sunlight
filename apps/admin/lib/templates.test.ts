@@ -6,7 +6,7 @@ describe("buildCreateTemplateInput", () => {
     const input = buildCreateTemplateInput({
       bodyTemplate: "Reply to {reply_email}",
       name: " Monthly ",
-      subjectTemplate: "Request for {agency_name}",
+      subjectTemplate: "Request for {authority_name}",
     });
 
     expect(input.name).toBe("Monthly");

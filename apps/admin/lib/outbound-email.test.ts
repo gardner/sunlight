@@ -8,10 +8,10 @@ import {
 } from "./outbound-email";
 
 const preparedRequest: PreparedSunlightRequest = {
-  agency_id: "agy_1",
-  agency_name: "The Treasury",
+  authority_id: "agy_1",
+  authority_name: "The Treasury",
   body_template:
-    "Tena koe {agency_name},\n\nPlease provide requests and responses for {covered_date_range}.\n\nUpload large files at {response_url}.",
+    "Tena koe {authority_name},\n\nPlease provide requests and responses for {covered_date_range}.\n\nUpload large files at {response_url}.",
   case_token_hint: "abc123",
   cycle_id: "cyc_2026_05",
   cycle_month: "2026-05",
@@ -21,7 +21,7 @@ const preparedRequest: PreparedSunlightRequest = {
   primary_request_email: "oia@example.govt.nz",
   reply_email: "reply-abc123@sunlight.nz",
   response_url: "https://requests.sunlight.nz/response/abc123",
-  subject_template: "OIA request for {agency_name} - {cycle_month}",
+  subject_template: "OIA request for {authority_name} - {cycle_month}",
   sunlight_request_id: "srq_1",
   template_id: "tpl_1",
 };

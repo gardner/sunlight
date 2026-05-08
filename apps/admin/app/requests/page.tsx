@@ -66,7 +66,7 @@ export default async function RequestsPage({ searchParams }: RequestsPageProps) 
         <table>
           <thead>
             <tr>
-              <th>Agency</th>
+              <th>Authority</th>
               <th>Cycle</th>
               <th>Status</th>
               <th>Due</th>
@@ -80,7 +80,7 @@ export default async function RequestsPage({ searchParams }: RequestsPageProps) 
                 className={isOverdueSunlightRequest(request, today) ? "dangerRow" : undefined}
                 key={request.id}
               >
-                <td>{request.agency_name}</td>
+                <td>{request.authority_name}</td>
                 <td>{request.cycle_month}</td>
                 <td>
                   <span className="pill">{request.status}</span>

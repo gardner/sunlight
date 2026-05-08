@@ -1,18 +1,18 @@
 import unittest
 
-from scripts.scrape_agency_contacts import (
-    Agency,
+from scripts.scrape_authority_contacts import (
+    Authority,
     build_scrape_sql,
     candidate_id,
     discover_page_emails,
-    fetch_agency_pages,
+    fetch_authority_pages,
     find_candidate_links,
     normalize_email,
     score_email,
 )
 
 
-class AgencyContactScraperTests(unittest.TestCase):
+class AuthorityContactScraperTests(unittest.TestCase):
     def test_normalizes_mailto_and_idna_domains(self):
         self.assertEqual(
             normalize_email("mailto:OIA@tamahere.māori.nz?subject=Request"),
@@ -85,8 +85,8 @@ class AgencyContactScraperTests(unittest.TestCase):
             },
         )
 
-        pages = fetch_agency_pages(
-            Agency(
+        pages = fetch_authority_pages(
+            Authority(
                 id="agy_1",
                 name="Example",
                 home_page_url="https://example.govt.nz/",
@@ -135,9 +135,9 @@ class AgencyContactScraperTests(unittest.TestCase):
         self.assertNotIn("personal-looking", score.reason)
 
     def test_builds_candidate_upsert_sql_and_review_status_update(self):
-        agency = Agency(
+        authority = Authority(
             id="agy_1",
-            name="Example Agency",
+            name="Example Authority",
             home_page_url="https://example.govt.nz",
             source_url="https://fyi.org.nz/body/example",
             contact_status="missing",
@@ -148,11 +148,11 @@ class AgencyContactScraperTests(unittest.TestCase):
             discovery_method="homepage",
         )
 
-        generated = build_scrape_sql({agency.id: candidates})
+        generated = build_scrape_sql({authority.id: candidates})
 
-        self.assertIn("INSERT INTO sunlight_agency_contact_candidates", generated)
+        self.assertIn("INSERT INTO sunlight_authority_contact_candidates", generated)
         self.assertIn(candidate_id("agy_1", "oia@example.govt.nz", "https://example.govt.nz/contact"), generated)
-        self.assertIn("ON CONFLICT(agency_id, normalized_email, source_url) DO UPDATE", generated)
+        self.assertIn("ON CONFLICT(authority_id, normalized_email, source_url) DO UPDATE", generated)
         self.assertIn("contact_status = 'needs_review'", generated)
         self.assertNotIn("primary_request_email", generated)
 

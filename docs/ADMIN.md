@@ -5,18 +5,18 @@
 The admin app at `https://admin.sunlight.nz` is the internal operations surface
 for Sunlight's recurring OIA/LGOIMA disclosure collection workflow.
 
-It manages Sunlight's own outbound requests to agencies and the agency responses
+It manages Sunlight's own outbound requests to authorities and the authority responses
 to those requests. It does not manage the original OIA/LGOIMA requests made by
-members of the public to agencies.
+members of the public to authorities.
 
 To avoid ambiguity, the product should use these terms consistently:
 
-* `SunlightRequest`: Sunlight's recurring request to an agency asking for that
-  agency's OIA/LGOIMA request and response material for a period.
-* `SunlightResponse`: An agency's reply to a `SunlightRequest`.
-* `DisclosedRequest`: An OIA/LGOIMA request disclosed by an agency in response
+* `SunlightRequest`: Sunlight's recurring request to an authority asking for that
+  authority's OIA/LGOIMA request and response material for a period.
+* `SunlightResponse`: An authority's reply to a `SunlightRequest`.
+* `DisclosedRequest`: An OIA/LGOIMA request disclosed by an authority in response
   to a `SunlightRequest`.
-* `DisclosedResponse`: An agency's OIA/LGOIMA response disclosed in response to
+* `DisclosedResponse`: An authority's OIA/LGOIMA response disclosed in response to
   a `SunlightRequest`.
 
 Phase 0 admin screens should focus only on `SunlightRequest` and
@@ -29,7 +29,7 @@ Primary admin users are Sunlight operators and technical maintainers.
 
 Operators need to:
 
-* maintain agency records and request contacts
+* maintain authority records and request contacts
 * configure request templates
 * create and approve monthly request cycles
 * monitor sent, replied, overdue, bounced, and failed cases
@@ -50,7 +50,7 @@ The admin app is a Cloudflare-hosted Vinext app backed by D1 and R2.
 
 D1 stores operational metadata:
 
-* agencies
+* authorities
 * request templates
 * request cycles
 * `SunlightRequest` cases
@@ -65,7 +65,7 @@ R2 stores raw artifacts:
 * rendered outbound email snapshots where useful
 * raw inbound `.eml` files
 * inbound email attachments
-* agency-uploaded files
+* authority-uploaded files
 * later parser input/output artifacts
 
 The Cloudflare apps should not perform PDF parsing, OCR, malware scanning beyond
@@ -77,7 +77,7 @@ The admin data model is the operational engine for Phase 0.
 
 Use `sunlight_*` table names for Sunlight's own collection workflow. Reserve
 `disclosed_*` table names for later extraction of the underlying OIA/LGOIMA
-request and response records contained in agency submissions.
+request and response records contained in authority submissions.
 
 Phase 0 D1 should store metadata and state. R2 should store raw artifacts and
 large files.
@@ -86,7 +86,7 @@ large files.
 
 Use these database namespaces:
 
-* `sunlight_agencies`
+* `sunlight_authorities`
 * `sunlight_request_templates`
 * `sunlight_request_cycles`
 * `sunlight_requests`
@@ -145,9 +145,9 @@ Constraints:
 * unique `email`
 * unique `access_subject_id` where present
 
-### `sunlight_agencies`
+### `sunlight_authorities`
 
-Represents agencies that receive recurring `SunlightRequest` emails.
+Represents authorities that receive recurring `SunlightRequest` emails.
 
 Columns:
 
@@ -173,11 +173,11 @@ Columns:
 Constraints:
 
 * unique `slug`
-* agencies can be active without a request email, but they are not sendable
+* authorities can be active without a request email, but they are not sendable
   until `contact_status = verified`
 * sending requires a valid `primary_request_email`
 
-`status` describes whether the agency belongs in Sunlight's active operating
+`status` describes whether the authority belongs in Sunlight's active operating
 directory. `contact_status` describes whether the current request contact is
 safe to use.
 
@@ -188,7 +188,7 @@ Send eligibility:
 * `primary_request_email` is present
 * an active template is assigned
 
-Imported agencies with missing or unverified contact details should remain
+Imported authorities with missing or unverified contact details should remain
 visible in admin but should not be included in approved send batches.
 
 ### `sunlight_request_templates`
@@ -208,7 +208,7 @@ Columns:
 
 Template variables:
 
-* `agency_name`
+* `authority_name`
 * `legal_regime`
 * `cycle_month`
 * `covered_date_range`
@@ -242,13 +242,13 @@ Constraints:
 
 ### `sunlight_requests`
 
-One `SunlightRequest` is one outbound request from Sunlight to one agency for
+One `SunlightRequest` is one outbound request from Sunlight to one authority for
 one cycle.
 
 Columns:
 
 * `id`
-* `agency_id`
+* `authority_id`
 * `cycle_id`
 * `template_id`
 * `case_token_hash`
@@ -282,7 +282,7 @@ Statuses:
 
 Constraints:
 
-* unique `(agency_id, cycle_id)`
+* unique `(authority_id, cycle_id)`
 * unique `case_token_hash`
 * unique `reply_email`
 
@@ -292,14 +292,14 @@ Token strategy:
 * Store only `case_token_hash` in D1 if practical.
 * Store a short `case_token_hint` for operator support, such as the first 6
   characters.
-* The agency-facing URL uses the raw token:
+* The authority-facing URL uses the raw token:
   `https://requests.sunlight.nz/response/{case_token}`.
 * The reply address should use a unique local part:
   `reply-{case_token}@sunlight.nz`.
 
 If storing only a hash prevents efficient inbound email association, use a
 separate random `reply_token` for email and store its hash or encrypted value
-with the same care. Do not embed agency names or cycle dates in tokens.
+with the same care. Do not embed authority names or cycle dates in tokens.
 
 Overdue derivation:
 
@@ -334,11 +334,11 @@ Columns:
 * `updated_at`
 
 The rendered body is operational metadata and may contain request context, but it
-should not contain agency-submitted response material.
+should not contain authority-submitted response material.
 
 ### `sunlight_responses`
 
-Represents an agency's reply to a `SunlightRequest`.
+Represents an authority's reply to a `SunlightRequest`.
 
 A response can be created from inbound email, upload submission, or manual
 operator entry.
@@ -347,12 +347,12 @@ Columns:
 
 * `id`
 * `sunlight_request_id`
-* `agency_id`
+* `authority_id`
 * `channel`: `email`, `upload`, `manual`
 * `category`
 * `status`
 * `received_at`
-* `agency_reference`
+* `authority_reference`
 * `submitter_name`
 * `submitter_email`
 * `notes`
@@ -418,7 +418,7 @@ Inbound email handling rule:
 
 ### `sunlight_uploads`
 
-Stores metadata for files uploaded through the agency response app.
+Stores metadata for files uploaded through the authority response app.
 
 Columns:
 
@@ -472,7 +472,7 @@ Columns:
 * `entity_type`
 * `entity_id`
 * `event_type`
-* `actor_type`: `admin`, `system`, `agency_token`, `on_prem_worker`
+* `actor_type`: `admin`, `system`, `authority_token`, `on_prem_worker`
 * `actor_id`
 * `actor_email`
 * `metadata_json`
@@ -485,11 +485,11 @@ file contents.
 
 Indexes should support the dashboard and overdue checks:
 
-* `sunlight_agencies(status, name)`
-* `sunlight_agencies(contact_status, status)`
-* `sunlight_agencies(source, source_id)`
+* `sunlight_authorities(status, name)`
+* `sunlight_authorities(contact_status, status)`
+* `sunlight_authorities(source, source_id)`
 * `sunlight_requests(cycle_id, status)`
-* `sunlight_requests(agency_id, cycle_id)`
+* `sunlight_requests(authority_id, cycle_id)`
 * `sunlight_requests(expected_due_at, status)`
 * `sunlight_requests(case_token_hash)`
 * `sunlight_requests(reply_email)`
@@ -517,21 +517,21 @@ unmatched-email/{inbound_email_id}/raw.eml
 
 ### Lifecycle Summary
 
-1. Operator creates agencies and templates.
+1. Operator creates authorities and templates.
 2. Operator creates a `sunlight_request_cycle`.
-3. System creates one `sunlight_request` per included active agency.
+3. System creates one `sunlight_request` per included active authority.
 4. System generates `case_token`, `reply_email`, and `response_url`.
 5. System queues and sends `sunlight_outbound_emails`.
-6. Agency replies by email or uploads files.
+6. Authority replies by email or uploads files.
 7. System creates `sunlight_inbound_emails`, `sunlight_uploads`, and
    `sunlight_responses`.
 8. Dashboard derives overdue and attention states from current records.
 9. Later document-ingestion workers consume R2 artifacts and update processing
    metadata.
 
-## Agency Seed Import
+## Authority Seed Import
 
-The FYI authority dataset can seed the agency directory, but it is not a
+The FYI authority dataset can seed the authority directory, but it is not a
 complete sending list because it does not include request contact email
 addresses.
 
@@ -555,14 +555,14 @@ Observed columns:
 
 Import mapping:
 
-* `Name` -> `sunlight_agencies.name`
-* `URL name` -> `sunlight_agencies.slug`
+* `Name` -> `sunlight_authorities.name`
+* `URL name` -> `sunlight_authorities.slug`
 * `Home page` -> `source_metadata_json.home_page`
 * `Publication scheme` -> `source_metadata_json.publication_scheme`
 * `Disclosure log` -> `source_metadata_json.disclosure_log`
 * `Tags` -> `source_metadata_json.tags`
-* `Notes` -> `sunlight_agencies.notes`
-* `Updated at` -> `sunlight_agencies.source_updated_at`
+* `Notes` -> `sunlight_authorities.notes`
+* `Updated at` -> `sunlight_authorities.source_updated_at`
 * fixed `source = fyi`
 * fixed `source_id = URL name`
 * fixed `source_url = https://fyi.org.nz/body/{URL name}` where appropriate
@@ -593,16 +593,16 @@ Import behavior:
 * never overwrite a verified request email with blank source data
 * never downgrade `contact_status = verified` automatically
 * preserve local operator notes separately if source notes are refreshed
-* write audit events for created agencies and meaningful imported updates
+* write audit events for created authorities and meaningful imported updates
 
 Admin review workflow:
 
 1. Import FYI authorities.
-2. Filter agencies by `contact_status = missing`.
+2. Filter authorities by `contact_status = missing`.
 3. Operator researches or confirms request email.
 4. Operator sets `primary_request_email`.
 5. Operator marks `contact_status = verified`.
-6. Agency becomes sendable once active and assigned to a template.
+6. Authority becomes sendable once active and assigned to a template.
 
 The first pilot should use an explicitly reviewed subset rather than every
 imported authority.
@@ -632,13 +632,13 @@ sent -> closed
 State meanings:
 
 * `draft`: cycle exists but generated request cases are not final
-* `previewed`: operator has generated a preview for active agencies
-* `approved`: operator approved the agency list and rendered request plan
+* `previewed`: operator has generated a preview for active authorities
+* `approved`: operator approved the authority list and rendered request plan
 * `sending`: outbound email send job is running
 * `sent`: send attempts are complete, including failures
 * `closed`: cycle is no longer active for normal operations
 
-Only `draft` and `previewed` cycles should allow agency inclusion/exclusion
+Only `draft` and `previewed` cycles should allow authority inclusion/exclusion
 changes.
 
 ### SunlightRequest States
@@ -675,7 +675,7 @@ State meanings:
 * `awaiting_response`: request has been sent and no qualifying response has
   closed it
 * `response_received`: a qualifying substantive response has been received
-* `partially_received`: agency indicated more material will follow
+* `partially_received`: authority indicated more material will follow
 * `held`: operator paused normal workflow
 * `failed`: send or operational setup failed
 * `closed`: operator considers the case complete
@@ -758,7 +758,7 @@ uploaded -> held
 held -> uploaded
 ```
 
-Uploads should not automatically close a request unless the agency submits a
+Uploads should not automatically close a request unless the authority submits a
 response completion choice.
 
 ## Admin Actions
@@ -774,12 +774,12 @@ All mutating actions must:
 
 Operators can:
 
-* create, edit, deactivate, and reactivate agencies
+* create, edit, deactivate, and reactivate authorities
 * create and edit request templates
 * preview template rendering
 * create request cycles
-* preview cycle agency selection
-* include or exclude agencies before approval
+* preview cycle authority selection
+* include or exclude authorities before approval
 * approve cycles
 * queue and send outbound request batches
 * retry failed sends
@@ -794,7 +794,7 @@ Operators can:
 
 Reviewers can:
 
-* view agencies, requests, responses, uploads, and inbound email
+* view authorities, requests, responses, uploads, and inbound email
 * categorize responses
 * mark responses accepted, duplicate, rejected, or held
 * add review notes
@@ -838,7 +838,7 @@ Required panels:
 
 Each count should link to a filtered list.
 
-### Agency List
+### Authority List
 
 Table columns:
 
@@ -859,11 +859,11 @@ Filters:
 * overdue
 * no current cycle request
 
-### Agency Detail
+### Authority Detail
 
 Sections:
 
-* agency profile
+* authority profile
 * contact emails
 * assigned template
 * recent `SunlightRequests`
@@ -877,7 +877,7 @@ Capabilities:
 
 * edit subject/body
 * validate variables
-* render preview for selected agency and cycle
+* render preview for selected authority and cycle
 * mark active/inactive
 * view previous sends that used the template
 
@@ -886,8 +886,8 @@ Capabilities:
 Sections:
 
 * cycle metadata
-* included agencies
-* excluded agencies
+* included authorities
+* excluded authorities
 * generated `SunlightRequests`
 * send progress
 * failures
@@ -906,11 +906,11 @@ This is the core case page.
 
 Sections:
 
-* agency and cycle summary
+* authority and cycle summary
 * status and overdue state
 * expected due date and override
 * reply email
-* agency response URL
+* authority response URL
 * outbound email history
 * inbound email
 * uploads
@@ -1065,7 +1065,7 @@ Priority:
 1. Exact reply address token in the recipient address.
 2. Exact response URL token in the email body or headers.
 3. Message headers that match a known outbound email.
-4. Sender address belongs to an agency with one active awaiting request.
+4. Sender address belongs to an authority with one active awaiting request.
 5. Manual operator association.
 
 The Worker should preserve unmatched email in R2 and create an
@@ -1075,7 +1075,7 @@ Ambiguous matches should never be auto-associated. They should enter triage.
 
 ## Manual Correction Model
 
-Operators need correction tools because agencies will reply in inconsistent
+Operators need correction tools because authorities will reply in inconsistent
 ways.
 
 Allowed corrections:
@@ -1122,12 +1122,12 @@ business logic.
 
 Use canonical event names. Event names should be stable strings.
 
-Agency events:
+Authority events:
 
-* `agency.created`
-* `agency.updated`
-* `agency.deactivated`
-* `agency.reactivated`
+* `authority.created`
+* `authority.updated`
+* `authority.deactivated`
+* `authority.reactivated`
 
 Template events:
 
@@ -1209,7 +1209,7 @@ Admin/auth events:
 The admin app should expose these top-level areas:
 
 * Dashboard
-* Agencies
+* Authorities
 * Templates
 * Request Cycles
 * Sunlight Requests
@@ -1238,14 +1238,14 @@ The dashboard should show operational status at a glance:
 
 Dashboard counters should link directly to filtered list views.
 
-## Agencies
+## Authorities
 
-Agency records represent public sector organizations receiving
+Authority records represent public sector organizations receiving
 `SunlightRequest` emails.
 
 Fields:
 
-* agency id
+* authority id
 * name
 * slug
 * legal regime: `OIA`, `LGOIMA`, or `other`
@@ -1260,13 +1260,13 @@ Fields:
 
 Required screens:
 
-* agency list with search and status filters
-* agency detail
-* create agency
-* edit agency
-* deactivate/reactivate agency
-* agency request history
-* agency response history
+* authority list with search and status filters
+* authority detail
+* create authority
+* edit authority
+* deactivate/reactivate authority
+* authority request history
+* authority response history
 
 ## Request Templates
 
@@ -1274,7 +1274,7 @@ Templates define outbound `SunlightRequest` email subject/body content.
 
 Templates should support variables:
 
-* agency name
+* authority name
 * request cycle month
 * covered date range
 * reply email address
@@ -1286,13 +1286,13 @@ Admin UX requirements:
 
 * list templates
 * create/edit templates
-* preview rendered email for a selected agency and cycle
+* preview rendered email for a selected authority and cycle
 * validate unsupported template variables before sending
 * mark templates active/inactive
 
 Template copy should make the request purpose explicit: Sunlight is requesting
-copies of OIA/LGOIMA requests received by the agency and the corresponding
-agency responses, not making a normal one-off information request for a single
+copies of OIA/LGOIMA requests received by the authority and the corresponding
+authority responses, not making a normal one-off information request for a single
 topic.
 
 ## Request Cycles
@@ -1313,25 +1313,25 @@ Fields:
 Workflow:
 
 1. Operator creates a monthly cycle.
-2. System selects active agencies.
+2. System selects active authorities.
 3. Operator previews generated `SunlightRequest` cases.
-4. Operator excludes agencies if needed.
+4. Operator excludes authorities if needed.
 5. Operator approves the cycle.
 6. System creates immutable case tokens, reply addresses, and response URLs.
 7. System queues outbound emails.
 8. System records send results and due dates.
 
-Sending must be idempotent per agency and cycle.
+Sending must be idempotent per authority and cycle.
 
 ## Sunlight Requests
 
-A `SunlightRequest` is one outbound request from Sunlight to one agency for one
+A `SunlightRequest` is one outbound request from Sunlight to one authority for one
 cycle.
 
 Fields:
 
 * request id
-* agency id
+* authority id
 * cycle id
 * template id
 * case token
@@ -1363,7 +1363,7 @@ Statuses:
 Admin list filters:
 
 * cycle
-* agency
+* authority
 * status
 * legal regime
 * due soon
@@ -1411,19 +1411,19 @@ The admin app should allow:
 
 ## Sunlight Responses
 
-A `SunlightResponse` is an agency reply to a `SunlightRequest`.
+A `SunlightResponse` is an authority reply to a `SunlightRequest`.
 
 It can arrive through:
 
 * inbound email to the case reply address
-* upload through the agency-facing response page
+* upload through the authority-facing response page
 * manual operator entry
 
 Fields:
 
 * response id
 * request id
-* agency id
+* authority id
 * received channel: `email`, `upload`, `manual`
 * received timestamp
 * response category
@@ -1495,7 +1495,7 @@ Every meaningful state transition should create an audit event.
 
 Events include:
 
-* agency created/updated/deactivated
+* authority created/updated/deactivated
 * template created/updated
 * cycle created/approved
 * `SunlightRequest` created
@@ -1569,7 +1569,7 @@ D1 admin user fields:
 
 Admin authorization roles:
 
-* operator: manage agencies, cycles, requests, responses, uploads
+* operator: manage authorities, cycles, requests, responses, uploads
 * reviewer: inspect responses and update response state
 * maintainer: inspect technical state, retries, and settings
 
@@ -1589,4 +1589,4 @@ The admin app does not:
 * parse PDFs or OCR documents inline
 * expose a public search API
 * support arbitrary public OIA request submission
-* manage the agency's original requesters as users
+* manage the authority's original requesters as users

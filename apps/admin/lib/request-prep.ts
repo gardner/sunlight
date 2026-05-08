@@ -1,5 +1,5 @@
 const ALLOWED_TEMPLATE_VARIABLES = new Set([
-  "agency_name",
+  "authority_name",
   "covered_date_range",
   "cycle_month",
   "legal_regime",
@@ -9,7 +9,7 @@ const ALLOWED_TEMPLATE_VARIABLES = new Set([
 ]);
 
 export interface TemplateVariables {
-  agency_name: string;
+  authority_name: string;
   covered_date_range: string;
   cycle_month: string;
   legal_regime: string;

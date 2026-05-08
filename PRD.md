@@ -26,7 +26,7 @@ Sunlight Requests is the first-party request and response collection engine for
 Sunlight NZ.
 
 Phase 0 focuses only on the operational core: sending recurring OIA/LGOIMA
-requests to agencies, receiving responses by email, associating those responses
+requests to authorities, receiving responses by email, associating those responses
 with the correct outgoing request, extracting usable text and metadata, and
 storing the resulting records safely with clear provenance.
 
@@ -37,15 +37,15 @@ phase. Those can be built later on top of a reliable request/response engine.
 ## 2. Problem Statement
 
 Official information responses in New Zealand are distributed across many
-agencies, formats, inboxes, websites, and release practices. Agencies may
+authorities, formats, inboxes, websites, and release practices. Authorities may
 disclose responses voluntarily, but there is no simple shared intake path that
 makes recurring disclosure easy to operate, easy to audit, and easy to reuse.
 
 Sunlight needs a durable collection system that can:
 
-* maintain a directory of agencies and request contacts
+* maintain a directory of authorities and request contacts
 * send recurring requests at a predictable cadence
-* receive and preserve agency replies
+* receive and preserve authority replies
 * keep replies tied to the correct outgoing request
 * process attachments and message bodies into structured records
 * store raw and parsed material for later review, publication, search, or other
@@ -54,7 +54,7 @@ Sunlight needs a durable collection system that can:
 ## 3. Vision
 
 Sunlight Requests should become dependable infrastructure for collecting
-voluntarily disclosed OIA/LGOIMA response material from agencies.
+voluntarily disclosed OIA/LGOIMA response material from authorities.
 
 The Phase 0 system should make the monthly request workflow boring, auditable,
 and repeatable. Later Sunlight products can use the stored data, but Phase 0 is
@@ -64,8 +64,8 @@ successful when the request/response engine itself works reliably.
 
 Build a system that:
 
-* manages an agency directory and request templates
-* sends recurring OIA/LGOIMA disclosure requests to selected agencies
+* manages an authority directory and request templates
+* sends recurring OIA/LGOIMA disclosure requests to selected authorities
 * generates a unique reply alias for each outgoing request
 * receives inbound email responses automatically
 * stores raw email, headers, bodies, and attachments immutably
@@ -85,32 +85,32 @@ Phase 0 will not aim to:
 * support arbitrary public user-submitted OIA requests
 * publish records automatically
 * make final legal or redaction decisions automatically
-* build agency compliance analytics
+* build authority compliance analytics
 * build alerts, subscriptions, dashboards for the public, or an external API
 * ingest broad public-record sources such as court decisions, Hansard, gazette
-  notices, regulator publications, or agency release logs
+  notices, regulator publications, or authority release logs
 * provide collaborative investigation tooling
 
 ## 6. Target Users
 
 ### Primary Users
 
-* Sunlight operators maintaining the agency directory and request cycles
+* Sunlight operators maintaining the authority directory and request cycles
 * Sunlight reviewers inspecting inbound responses and processing failures
 * technical maintainers monitoring mail, parsing, storage, and job health
 
 ### Secondary Users
 
-* agency staff responding to recurring disclosure requests by email
+* authority staff responding to recurring disclosure requests by email
 * future Sunlight products that consume the stored request/response records
 
 ## 7. User Needs
 
 ### Operators Need To:
 
-* manage agencies, contacts, legal regimes, and active/inactive status
+* manage authorities, contacts, legal regimes, and active/inactive status
 * configure request templates and monthly cycles
-* see which agencies are due, sent, replied, overdue, or failed
+* see which authorities are due, sent, replied, overdue, or failed
 * inspect all outbound request records and inbound response records
 * correct metadata and association mistakes
 * retry failed sends or processing jobs
@@ -138,7 +138,7 @@ Phase 0 will not aim to:
 
 2. **Provenance first**
    Every stored response must trace back to an outbound request, inbound email,
-   agency, timestamp, and original artifact where possible.
+   authority, timestamp, and original artifact where possible.
 
 3. **Safe by default**
    No unreviewed first-party material is automatically published.
@@ -148,8 +148,8 @@ Phase 0 will not aim to:
    association, classification, parsing, and metadata errors.
 
 5. **Simple interfaces**
-   Agencies should only need to reply by email. The system should not require
-   agencies to learn a portal in Phase 0.
+   Authorities should only need to reply by email. The system should not require
+   authorities to learn a portal in Phase 0.
 
 6. **Downstream-ready storage**
    Store raw and parsed data in a way that future publication, search, analytics,
@@ -159,7 +159,7 @@ Phase 0 will not aim to:
 
 ### In Scope for Phase 0
 
-* agency directory
+* authority directory
 * request template management
 * monthly request scheduling
 * outbound email generation and delivery tracking
@@ -189,9 +189,9 @@ Phase 0 will not aim to:
 
 ## 10. Core Product Features
 
-### 10.1 Agency Directory
+### 10.1 Authority Directory
 
-The system maintains a directory of agencies and local authorities, including:
+The system maintains a directory of authorities and local authorities, including:
 
 * organization name
 * legal regime: OIA, LGOIMA, or other
@@ -208,7 +208,7 @@ requests.
 
 Templates should support variables such as:
 
-* agency name
+* authority name
 * request month
 * date range covered
 * reply instructions
@@ -216,20 +216,20 @@ Templates should support variables such as:
 
 ### 10.3 Monthly Request Scheduling
 
-The system selects agencies due for a request cycle and creates outbound request
+The system selects authorities due for a request cycle and creates outbound request
 records for the relevant month.
 
 The scheduler should support:
 
 * monthly cadence by default
-* manual inclusion/exclusion of agencies
+* manual inclusion/exclusion of authorities
 * dry-run previews before sending
 * operator approval before a batch is sent
 * retry of failed sends
 
 ### 10.4 Outbound Email Delivery
 
-The system sends recurring OIA/LGOIMA disclosure request emails to agencies and
+The system sends recurring OIA/LGOIMA disclosure request emails to authorities and
 records:
 
 * generated subject and body
@@ -252,7 +252,7 @@ alias is the primary association mechanism.
 
 ### 10.6 Inbound Email Intake
 
-The system receives agency replies by email and stores:
+The system receives authority replies by email and stores:
 
 * raw message
 * envelope sender and recipients
@@ -324,10 +324,10 @@ block the entire request case.
 
 The system extracts and stores structured metadata where feasible:
 
-* agency
+* authority
 * request month covered
 * response date
-* agency reference number
+* authority reference number
 * response category
 * withholding grounds cited
 * attachment count
@@ -340,7 +340,7 @@ and manual override support.
 
 ### 10.12 Case Tracking
 
-Each monthly request to an agency is tracked as a case with statuses such as:
+Each monthly request to an authority is tracked as a case with statuses such as:
 
 * draft
 * scheduled
@@ -391,19 +391,19 @@ The system records an audit trail for:
 
 ## 11. Functional Requirements
 
-### 11.1 Agencies
+### 11.1 Authorities
 
-The system shall maintain an agency directory with request contact details,
+The system shall maintain an authority directory with request contact details,
 legal regime, template assignment, and active status.
 
 ### 11.2 Request Cycles
 
-The system shall create monthly request cycles and select eligible agencies.
+The system shall create monthly request cycles and select eligible authorities.
 
 ### 11.3 Outbound Requests
 
-The system shall create one outbound request case per agency per cycle unless an
-operator excludes that agency.
+The system shall create one outbound request case per authority per cycle unless an
+operator excludes that authority.
 
 ### 11.4 Email Aliases
 
@@ -457,7 +457,7 @@ The system shall not expose first-party response material publicly in Phase 0.
 ### 12.1 Monthly Outbound Request Workflow
 
 1. Operator creates or opens the monthly request cycle.
-2. Scheduler selects active agencies due for the cycle.
+2. Scheduler selects active authorities due for the cycle.
 3. Operator previews the batch.
 4. Operator approves the batch.
 5. System creates request cases and unique reply aliases.
@@ -467,7 +467,7 @@ The system shall not expose first-party response material publicly in Phase 0.
 
 ### 12.2 Inbound Response Workflow
 
-1. Agency replies by email.
+1. Authority replies by email.
 2. Mail provider receives the message.
 3. System stores the raw email and attachments.
 4. System associates the message with the correct request case.
@@ -496,7 +496,7 @@ The system shall not expose first-party response material publicly in Phase 0.
 
 ## 13. Conceptual Data Model
 
-### Agency
+### Authority
 
 Represents a public-sector organization that can receive recurring requests.
 
@@ -542,12 +542,12 @@ Key fields:
 
 ### RequestCase
 
-One agency's request for one cycle.
+One authority's request for one cycle.
 
 Key fields:
 
 * id
-* agency_id
+* authority_id
 * cycle_id
 * template_id
 * reply_alias
@@ -558,7 +558,7 @@ Key fields:
 
 ### OutboundMessage
 
-The email sent to an agency.
+The email sent to an authority.
 
 Key fields:
 
@@ -574,7 +574,7 @@ Key fields:
 
 ### InboundMessage
 
-An email received from an agency or mail provider.
+An email received from an authority or mail provider.
 
 Key fields:
 
@@ -616,11 +616,11 @@ Key fields:
 
 * id
 * request_case_id
-* agency_id
+* authority_id
 * response_date
 * request_month
 * response_category
-* agency_reference
+* authority_reference
 * title
 * summary
 * metadata
@@ -659,7 +659,7 @@ The system must:
 ## 15. Operational Requirements
 
 * The monthly send process should support dry runs.
-* Sending should be idempotent per agency and cycle.
+* Sending should be idempotent per authority and cycle.
 * Inbound receipt should preserve raw material before parsing.
 * Processing should be retryable.
 * Parser failures should be isolated to individual files where possible.
@@ -670,7 +670,7 @@ The system must:
 
 ### Phase 0A: Request Intake Foundation
 
-* agency directory
+* authority directory
 * request templates
 * request cycles
 * outbound request cases
@@ -703,8 +703,8 @@ The system must:
 
 Phase 0 is successful when Sunlight can:
 
-* send monthly requests to a defined agency list
-* receive agency replies through unique aliases
+* send monthly requests to a defined authority list
+* receive authority replies through unique aliases
 * associate replies with the correct request case
 * preserve raw emails and attachments
 * parse common attachment formats
@@ -716,7 +716,7 @@ Phase 0 is successful when Sunlight can:
 ## 18. Open Questions
 
 * What exact wording should the recurring disclosure request use?
-* Which agencies are included in the first pilot?
+* Which authorities are included in the first pilot?
 * Should the first pilot be monthly or quarterly?
 * Which mail provider should be used for inbound and outbound processing?
 * What attachment file types are required for the first pilot?

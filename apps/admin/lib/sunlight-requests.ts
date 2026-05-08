@@ -6,7 +6,7 @@ const OPEN_REQUEST_STATUSES = new Set([
 ]);
 
 export interface SunlightRequestListItem {
-  agency_name: string;
+  authority_name: string;
   cycle_month: string;
   expected_due_at: string | null;
   id: string;
@@ -61,14 +61,14 @@ export async function listSunlightRequests(
         sunlight_requests.expected_due_at,
         sunlight_requests.last_sent_at,
         sunlight_requests.last_response_at,
-        sunlight_agencies.name AS agency_name,
-        sunlight_agencies.legal_regime,
+        sunlight_authorities.name AS authority_name,
+        sunlight_authorities.legal_regime,
         sunlight_request_cycles.cycle_month
       FROM sunlight_requests
-      JOIN sunlight_agencies ON sunlight_agencies.id = sunlight_requests.agency_id
+      JOIN sunlight_authorities ON sunlight_authorities.id = sunlight_requests.authority_id
       JOIN sunlight_request_cycles ON sunlight_request_cycles.id = sunlight_requests.cycle_id
       ${statusClause}
-      ORDER BY sunlight_requests.expected_due_at ASC, sunlight_agencies.name
+      ORDER BY sunlight_requests.expected_due_at ASC, sunlight_authorities.name
       LIMIT 250
     `,
   );

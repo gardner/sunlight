@@ -1,28 +1,28 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { AgencyListItem, AgencyStatus, ContactStatus } from "../../lib/agencies";
+import type { AuthorityListItem, AuthorityStatus, ContactStatus } from "../../lib/authorities";
 
-interface AgencyBrowserProps {
-  agencies: AgencyListItem[];
+interface AuthorityBrowserProps {
+  authorities: AuthorityListItem[];
 }
 
 const PAGE_SIZES = [25, 50, 100] as const;
 
-export function AgencyBrowser({ agencies }: AgencyBrowserProps) {
+export function AuthorityBrowser({ authorities }: AuthorityBrowserProps) {
   const [search, setSearch] = useState("");
   const [contactStatus, setContactStatus] = useState<ContactStatus | "">("");
-  const [status, setStatus] = useState<AgencyStatus | "">("");
+  const [status, setStatus] = useState<AuthorityStatus | "">("");
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
 
   const filtered = useMemo(
     () =>
-      agencies.filter((agency) => {
-        if (contactStatus && agency.contact_status !== contactStatus) {
+      authorities.filter((authority) => {
+        if (contactStatus && authority.contact_status !== contactStatus) {
           return false;
         }
-        if (status && agency.status !== status) {
+        if (status && authority.status !== status) {
           return false;
         }
         if (!search.trim()) {
@@ -31,23 +31,23 @@ export function AgencyBrowser({ agencies }: AgencyBrowserProps) {
 
         const term = search.trim().toLowerCase();
         return [
-          agency.name,
-          agency.slug,
-          agency.legal_regime,
-          agency.primary_request_email ?? "",
-          agency.contact_status,
-          agency.status,
+          authority.name,
+          authority.slug,
+          authority.legal_regime,
+          authority.primary_request_email ?? "",
+          authority.contact_status,
+          authority.status,
         ].some((value) => value.toLowerCase().includes(term));
       }),
-    [agencies, contactStatus, search, status],
+    [authorities, contactStatus, search, status],
   );
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const firstIndex = (currentPage - 1) * pageSize;
-  const visibleAgencies = filtered.slice(firstIndex, firstIndex + pageSize);
+  const visibleAuthorities = filtered.slice(firstIndex, firstIndex + pageSize);
   const firstVisible = filtered.length === 0 ? 0 : firstIndex + 1;
-  const lastVisible = Math.min(filtered.length, firstIndex + visibleAgencies.length);
+  const lastVisible = Math.min(filtered.length, firstIndex + visibleAuthorities.length);
 
   function resetToFirstPage() {
     setPage(1);
@@ -65,7 +65,7 @@ export function AgencyBrowser({ agencies }: AgencyBrowserProps) {
         <label>
           Search
           <input
-            aria-label="Search agencies"
+            aria-label="Search authorities"
             name="search"
             onChange={(event) => {
               setSearch(event.currentTarget.value);
@@ -75,7 +75,7 @@ export function AgencyBrowser({ agencies }: AgencyBrowserProps) {
               setSearch(event.currentTarget.value);
               resetToFirstPage();
             }}
-            placeholder="Type to filter agencies"
+            placeholder="Type to filter authorities"
             value={search}
           />
         </label>
@@ -101,7 +101,7 @@ export function AgencyBrowser({ agencies }: AgencyBrowserProps) {
           <select
             name="status"
             onChange={(event) => {
-              setStatus(event.currentTarget.value as AgencyStatus | "");
+              setStatus(event.currentTarget.value as AuthorityStatus | "");
               resetToFirstPage();
             }}
             value={status}
@@ -151,7 +151,7 @@ export function AgencyBrowser({ agencies }: AgencyBrowserProps) {
       <div className="tableMeta">
         <p>
           Showing {firstVisible.toLocaleString()}-{lastVisible.toLocaleString()} of{" "}
-          {filtered.length.toLocaleString()} agencies
+          {filtered.length.toLocaleString()} authorities
         </p>
         <p>
           Page {currentPage.toLocaleString()} of {pageCount.toLocaleString()}
@@ -170,22 +170,22 @@ export function AgencyBrowser({ agencies }: AgencyBrowserProps) {
             </tr>
           </thead>
           <tbody>
-            {visibleAgencies.map((agency) => (
-              <tr key={agency.id}>
+            {visibleAuthorities.map((authority) => (
+              <tr key={authority.id}>
                 <td>
-                  <a href={`/agencies/${agency.id}`}>{agency.name}</a>
+                  <a href={`/authorities/${authority.id}`}>{authority.name}</a>
                 </td>
-                <td>{agency.legal_regime}</td>
+                <td>{authority.legal_regime}</td>
                 <td>
-                  <span className="pill">{agency.contact_status}</span>
+                  <span className="pill">{authority.contact_status}</span>
                 </td>
-                <td>{agency.status}</td>
-                <td>{agency.primary_request_email ?? ""}</td>
+                <td>{authority.status}</td>
+                <td>{authority.primary_request_email ?? ""}</td>
               </tr>
             ))}
-            {visibleAgencies.length === 0 ? (
+            {visibleAuthorities.length === 0 ? (
               <tr>
-                <td colSpan={5}>No agencies match the current filters.</td>
+                <td colSpan={5}>No authorities match the current filters.</td>
               </tr>
             ) : null}
           </tbody>
@@ -209,7 +209,7 @@ function Pagination({
   const pages = buildPaginationPages(page, pageCount);
 
   return (
-    <nav className="pagination" aria-label="Agency pagination">
+    <nav className="pagination" aria-label="Authority pagination">
       <button
         className="button secondary"
         disabled={page <= 1}

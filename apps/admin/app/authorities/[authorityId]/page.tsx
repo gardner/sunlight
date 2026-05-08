@@ -1,25 +1,25 @@
 import { env } from "cloudflare:workers";
 import { notFound } from "next/navigation";
-import { getAgency } from "../../../lib/agencies";
+import { getAuthority } from "../../../lib/authorities";
 import { listTemplates } from "../../../lib/templates";
 import { assignTemplateAction, verifyContactAction } from "./actions";
 
-interface AgencyDetailPageProps {
-  params: Promise<{ agencyId: string }>;
+interface AuthorityDetailPageProps {
+  params: Promise<{ authorityId: string }>;
 }
 
-export default async function AgencyDetailPage({ params }: AgencyDetailPageProps) {
-  const { agencyId } = await params;
+export default async function AuthorityDetailPage({ params }: AuthorityDetailPageProps) {
+  const { authorityId } = await params;
   const db = (env as unknown as CloudflareEnv).DB;
-  const agency = await getAgency(db, agencyId);
+  const authority = await getAuthority(db, authorityId);
 
-  if (!agency) {
+  if (!authority) {
     notFound();
   }
 
   const templates = await listTemplates(db);
 
-  const metadata = JSON.parse(agency.source_metadata_json) as {
+  const metadata = JSON.parse(authority.source_metadata_json) as {
     disclosure_log?: string | null;
     home_page?: string | null;
     tags?: string[];
@@ -29,11 +29,11 @@ export default async function AgencyDetailPage({ params }: AgencyDetailPageProps
     <main className="shell">
       <header className="pageHeader">
         <div>
-          <p className="eyebrow">Agency</p>
-          <h1>{agency.name}</h1>
+          <p className="eyebrow">Authority</p>
+          <h1>{authority.name}</h1>
         </div>
-        <a className="button" href="/agencies">
-          Agencies
+        <a className="button" href="/authorities">
+          Authorities
         </a>
       </header>
 
@@ -43,28 +43,28 @@ export default async function AgencyDetailPage({ params }: AgencyDetailPageProps
           <dl className="facts">
             <div>
               <dt>Primary request email</dt>
-              <dd>{agency.primary_request_email ?? "Missing"}</dd>
+              <dd>{authority.primary_request_email ?? "Missing"}</dd>
             </div>
             <div>
               <dt>Contact status</dt>
-              <dd>{agency.contact_status}</dd>
+              <dd>{authority.contact_status}</dd>
             </div>
             <div>
               <dt>Directory status</dt>
-              <dd>{agency.status}</dd>
+              <dd>{authority.status}</dd>
             </div>
             <div>
               <dt>Legal regime</dt>
-              <dd>{agency.legal_regime}</dd>
+              <dd>{authority.legal_regime}</dd>
             </div>
           </dl>
           <form action={verifyContactAction} className="stack">
-            <input type="hidden" name="agencyId" value={agency.id} />
+            <input type="hidden" name="authorityId" value={authority.id} />
             <label>
               Verify request email
               <input
                 name="email"
-                defaultValue={agency.primary_request_email ?? ""}
+                defaultValue={authority.primary_request_email ?? ""}
                 placeholder="oia@example.govt.nz"
                 type="email"
               />
@@ -74,10 +74,10 @@ export default async function AgencyDetailPage({ params }: AgencyDetailPageProps
             </button>
           </form>
           <form action={assignTemplateAction} className="stack">
-            <input type="hidden" name="agencyId" value={agency.id} />
+            <input type="hidden" name="authorityId" value={authority.id} />
             <label>
               Default template
-              <select name="templateId" defaultValue={agency.default_template_id ?? ""}>
+              <select name="templateId" defaultValue={authority.default_template_id ?? ""}>
                 <option value="">Choose template</option>
                 {templates.map((template) => (
                   <option key={template.id} value={template.id}>
@@ -97,15 +97,15 @@ export default async function AgencyDetailPage({ params }: AgencyDetailPageProps
           <dl className="facts">
             <div>
               <dt>Source</dt>
-              <dd>{agency.source ?? "Manual"}</dd>
+              <dd>{authority.source ?? "Manual"}</dd>
             </div>
             <div>
               <dt>Source id</dt>
-              <dd>{agency.source_id ?? ""}</dd>
+              <dd>{authority.source_id ?? ""}</dd>
             </div>
             <div>
               <dt>Updated</dt>
-              <dd>{agency.source_updated_at ?? ""}</dd>
+              <dd>{authority.source_updated_at ?? ""}</dd>
             </div>
             <div>
               <dt>Home page</dt>

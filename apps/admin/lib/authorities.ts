@@ -1,33 +1,33 @@
 export type ContactStatus = "missing" | "needs_review" | "verified" | "invalid";
-export type AgencyStatus = "active" | "inactive";
+export type AuthorityStatus = "active" | "inactive";
 
-export interface AgencyFilters {
+export interface AuthorityFilters {
   contactStatus?: ContactStatus;
   page: number;
   pageSize: number;
   search?: string;
-  status?: AgencyStatus;
+  status?: AuthorityStatus;
 }
 
-export interface AgencyListPage {
-  items: AgencyListItem[];
+export interface AuthorityListPage {
+  items: AuthorityListItem[];
   page: number;
   pageCount: number;
   pageSize: number;
   total: number;
 }
 
-export interface AgencyListItem {
+export interface AuthorityListItem {
   contact_status: ContactStatus;
   id: string;
   legal_regime: "OIA" | "LGOIMA" | "other";
   name: string;
   primary_request_email: string | null;
   slug: string;
-  status: AgencyStatus;
+  status: AuthorityStatus;
 }
 
-export interface AgencyDetail extends AgencyListItem {
+export interface AuthorityDetail extends AuthorityListItem {
   default_cadence: string;
   default_template_id: string | null;
   notes: string | null;
@@ -45,12 +45,12 @@ const CONTACT_STATUSES = new Set<ContactStatus>([
   "invalid",
 ]);
 
-const AGENCY_STATUSES = new Set<AgencyStatus>(["active", "inactive"]);
+const AUTHORITY_STATUSES = new Set<AuthorityStatus>(["active", "inactive"]);
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZES = new Set([25, 50, 100]);
 
-export function normalizeAgencyFilters(input: Record<string, string | undefined>): AgencyFilters {
-  const filters: AgencyFilters = {
+export function normalizeAuthorityFilters(input: Record<string, string | undefined>): AuthorityFilters {
+  const filters: AuthorityFilters = {
     page: normalizePositiveInteger(input.page, 1),
     pageSize: normalizePageSize(input.pageSize),
   };
@@ -61,8 +61,8 @@ export function normalizeAgencyFilters(input: Record<string, string | undefined>
   if (contactStatus && CONTACT_STATUSES.has(contactStatus as ContactStatus)) {
     filters.contactStatus = contactStatus as ContactStatus;
   }
-  if (status && AGENCY_STATUSES.has(status as AgencyStatus)) {
-    filters.status = status as AgencyStatus;
+  if (status && AUTHORITY_STATUSES.has(status as AuthorityStatus)) {
+    filters.status = status as AuthorityStatus;
   }
   if (search) {
     filters.search = search;
@@ -71,7 +71,7 @@ export function normalizeAgencyFilters(input: Record<string, string | undefined>
   return filters;
 }
 
-export function buildAgencyWhereClause(filters: Partial<AgencyFilters> = {}) {
+export function buildAuthorityWhereClause(filters: Partial<AuthorityFilters> = {}) {
   const where = [];
   const bindings: string[] = [];
 
@@ -95,20 +95,20 @@ export function buildAgencyWhereClause(filters: Partial<AgencyFilters> = {}) {
   };
 }
 
-export function buildAgencyCountQuery(filters: Partial<AgencyFilters> = {}) {
-  const where = buildAgencyWhereClause(filters);
+export function buildAuthorityCountQuery(filters: Partial<AuthorityFilters> = {}) {
+  const where = buildAuthorityWhereClause(filters);
   return {
     bindings: where.bindings,
     sql: `
       SELECT COUNT(*) AS total
-      FROM sunlight_agencies
+      FROM sunlight_authorities
       ${where.sql}
     `,
   };
 }
 
-export function buildAgencyListQuery(filters: Partial<AgencyFilters> = {}) {
-  const where = buildAgencyWhereClause(filters);
+export function buildAuthorityListQuery(filters: Partial<AuthorityFilters> = {}) {
+  const where = buildAuthorityWhereClause(filters);
   const page = filters.page ?? 1;
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE;
   const offset = (page - 1) * pageSize;
@@ -122,7 +122,7 @@ export function buildAgencyListQuery(filters: Partial<AgencyFilters> = {}) {
       primary_request_email,
       contact_status,
       status
-    FROM sunlight_agencies
+    FROM sunlight_authorities
     ${where.sql}
     ORDER BY
       CASE contact_status
@@ -138,7 +138,7 @@ export function buildAgencyListQuery(filters: Partial<AgencyFilters> = {}) {
   return { bindings: [...where.bindings, pageSize, offset], sql };
 }
 
-export function buildAllAgenciesQuery() {
+export function buildAllAuthoritiesQuery() {
   return {
     bindings: [],
     sql: `
@@ -150,7 +150,7 @@ export function buildAllAgenciesQuery() {
         primary_request_email,
         contact_status,
         status
-      FROM sunlight_agencies
+      FROM sunlight_authorities
       ORDER BY
         CASE contact_status
           WHEN 'verified' THEN 0
@@ -163,26 +163,26 @@ export function buildAllAgenciesQuery() {
   };
 }
 
-export async function listAgencies(
+export async function listAuthorities(
   db: D1Database,
-  filters: AgencyFilters,
-): Promise<AgencyListItem[]> {
-  const query = buildAgencyListQuery(filters);
-  const result = await db.prepare(query.sql).bind(...query.bindings).all<AgencyListItem>();
+  filters: AuthorityFilters,
+): Promise<AuthorityListItem[]> {
+  const query = buildAuthorityListQuery(filters);
+  const result = await db.prepare(query.sql).bind(...query.bindings).all<AuthorityListItem>();
   return result.results;
 }
 
-export async function listAllAgencies(db: D1Database): Promise<AgencyListItem[]> {
-  const query = buildAllAgenciesQuery();
-  const result = await db.prepare(query.sql).bind(...query.bindings).all<AgencyListItem>();
+export async function listAllAuthorities(db: D1Database): Promise<AuthorityListItem[]> {
+  const query = buildAllAuthoritiesQuery();
+  const result = await db.prepare(query.sql).bind(...query.bindings).all<AuthorityListItem>();
   return result.results;
 }
 
-export async function listAgencyPage(
+export async function listAuthorityPage(
   db: D1Database,
-  filters: AgencyFilters,
-): Promise<AgencyListPage> {
-  const countQuery = buildAgencyCountQuery(filters);
+  filters: AuthorityFilters,
+): Promise<AuthorityListPage> {
+  const countQuery = buildAuthorityCountQuery(filters);
   const count = await db
     .prepare(countQuery.sql)
     .bind(...countQuery.bindings)
@@ -190,7 +190,7 @@ export async function listAgencyPage(
   const total = count?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / filters.pageSize));
   const page = Math.min(filters.page, pageCount);
-  const items = await listAgencies(db, { ...filters, page });
+  const items = await listAuthorities(db, { ...filters, page });
 
   return {
     items,
@@ -201,7 +201,7 @@ export async function listAgencyPage(
   };
 }
 
-export async function getAgency(db: D1Database, agencyId: string): Promise<AgencyDetail | null> {
+export async function getAuthority(db: D1Database, authorityId: string): Promise<AuthorityDetail | null> {
   return db
     .prepare(
       `
@@ -221,25 +221,25 @@ export async function getAgency(db: D1Database, agencyId: string): Promise<Agenc
           source_updated_at,
           source_metadata_json,
           notes
-        FROM sunlight_agencies
+        FROM sunlight_authorities
         WHERE id = ?
         LIMIT 1
       `,
     )
-    .bind(agencyId)
-    .first<AgencyDetail>();
+    .bind(authorityId)
+    .first<AuthorityDetail>();
 }
 
-export function buildVerifyContactUpdate(input: { agencyId: string; email: string }) {
+export function buildVerifyContactUpdate(input: { authorityId: string; email: string }) {
   const email = normalizeEmail(input.email);
   if (!email) {
     throw new Error("Contact verification requires a valid email address");
   }
 
   return {
-    bindings: [email, input.agencyId],
+    bindings: [email, input.authorityId],
     sql: `
-      UPDATE sunlight_agencies
+      UPDATE sunlight_authorities
       SET primary_request_email = ?,
           contact_status = 'verified',
           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -248,23 +248,23 @@ export function buildVerifyContactUpdate(input: { agencyId: string; email: strin
   };
 }
 
-export async function verifyAgencyContact(
+export async function verifyAuthorityContact(
   db: D1Database,
-  input: { agencyId: string; email: string },
+  input: { authorityId: string; email: string },
 ): Promise<void> {
   const query = buildVerifyContactUpdate(input);
   await db.prepare(query.sql).bind(...query.bindings).run();
 }
 
-export function buildAssignTemplateUpdate(input: { agencyId: string; templateId: string }) {
-  if (!input.agencyId || !input.templateId) {
-    throw new Error("Agency and template are required");
+export function buildAssignTemplateUpdate(input: { authorityId: string; templateId: string }) {
+  if (!input.authorityId || !input.templateId) {
+    throw new Error("Authority and template are required");
   }
 
   return {
-    bindings: [input.templateId, input.agencyId],
+    bindings: [input.templateId, input.authorityId],
     sql: `
-      UPDATE sunlight_agencies
+      UPDATE sunlight_authorities
       SET default_template_id = ?,
           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ?
@@ -272,9 +272,9 @@ export function buildAssignTemplateUpdate(input: { agencyId: string; templateId:
   };
 }
 
-export async function assignAgencyTemplate(
+export async function assignAuthorityTemplate(
   db: D1Database,
-  input: { agencyId: string; templateId: string },
+  input: { authorityId: string; templateId: string },
 ): Promise<void> {
   const query = buildAssignTemplateUpdate(input);
   await db.prepare(query.sql).bind(...query.bindings).run();
