@@ -2,9 +2,9 @@
 
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE sunlight_authority_contact_candidates (
+CREATE TABLE sunlight_agency_contact_candidates (
   id TEXT PRIMARY KEY,
-  authority_id TEXT NOT NULL,
+  agency_id TEXT NOT NULL,
   email TEXT NOT NULL,
   normalized_email TEXT NOT NULL,
   source_url TEXT NOT NULL,
@@ -20,13 +20,13 @@ CREATE TABLE sunlight_authority_contact_candidates (
   last_seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE (authority_id, normalized_email, source_url),
-  FOREIGN KEY (authority_id) REFERENCES sunlight_authorities(id)
+  UNIQUE (agency_id, normalized_email, source_url),
+  FOREIGN KEY (agency_id) REFERENCES sunlight_agencies(id)
 );
 
-CREATE INDEX idx_sunlight_contact_candidates_authority_status_confidence
-  ON sunlight_authority_contact_candidates (authority_id, status, confidence);
+CREATE INDEX idx_sunlight_contact_candidates_agency_status_confidence
+  ON sunlight_agency_contact_candidates (agency_id, status, confidence);
 CREATE INDEX idx_sunlight_contact_candidates_normalized_email
-  ON sunlight_authority_contact_candidates (normalized_email);
+  ON sunlight_agency_contact_candidates (normalized_email);
 CREATE INDEX idx_sunlight_contact_candidates_source_url
-  ON sunlight_authority_contact_candidates (source_url);
+  ON sunlight_agency_contact_candidates (source_url);

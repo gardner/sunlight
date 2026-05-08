@@ -134,6 +134,19 @@ class AuthorityContactScraperTests(unittest.TestCase):
         self.assertGreaterEqual(score.confidence, 70)
         self.assertNotIn("personal-looking", score.reason)
 
+    def test_penalizes_external_domains_found_on_authority_pages(self):
+        score = score_email(
+            "info@ombudsman.parliament.nz",
+            source_url="https://acc.co.nz/contact/official-information-act-requests",
+            source_page_title="Official information requests",
+            source_snippet="Contact the Ombudsman at info@ombudsman.parliament.nz",
+            home_page_url="https://acc.co.nz",
+            discovery_method="linked_page",
+        )
+
+        self.assertLess(score.confidence, 50)
+        self.assertIn("email domain differs", score.reason)
+
     def test_builds_candidate_upsert_sql_and_review_status_update(self):
         authority = Authority(
             id="agy_1",

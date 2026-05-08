@@ -2,9 +2,10 @@
 
 ## Current Slice
 
-The terminology rename to authorities is complete. The authority contact
-scraper first slice is complete. The request preparation slice and outbound
-email slice remain implemented through dry-run deployment validation.
+The terminology rename to authorities is complete and the deployed D1 schema has
+been migrated forward to match it. The authority contact review loop now exists
+in the admin app. The current operational focus is getting high-quality request
+addresses reviewed for every active authority before enabling real sends.
 
 Completed:
 
@@ -77,14 +78,14 @@ Completed:
 * Moved `sunlight.webp` into the landing app public assets and used it as the
   hero image.
 * Added `curl_cffi` and `beautifulsoup4` for the authority contact scraper.
-* Added D1 migration `0002_authority_contact_candidates.sql` for scraped contact
+* Added D1 migration `0002_agency_contact_candidates.sql` for scraped contact
   candidates.
 * Added tested Python helpers for email normalization, extraction, candidate
   link selection, scoring, and SQL generation.
 * Added `scripts/scrape_authority_contacts.py` with conservative dry-run,
   `--write-sql`, `--source-file`, and remote D1 apply support.
 * Deployed the updated landing app to `sunlight.nz` and `www.sunlight.nz`.
-* Applied contact-candidate migration `0002_authority_contact_candidates.sql`
+* Applied contact-candidate migration `0002_agency_contact_candidates.sql`
   locally and remotely.
 * Added Brave Search seeding for official same-site contact discovery using
   `BRAVE_SEARCH_API_KEY`, one search request per authority.
@@ -96,8 +97,26 @@ Completed:
   candidates were found for Auckland Council, Ministry of Justice, and
   Wellington City Council.
 * Renamed the core domain terminology, admin routes, response app workspace,
-  scripts, migrations, docs, and tests to use authority and authorities
-  language.
+  scripts, docs, and tests to use authority and authorities language.
+* Restored applied migration filenames/content as immutable history and added
+  `0003_rename_agencies_to_authorities.sql` to migrate deployed D1 tables and
+  columns from agency naming to authority naming.
+* Applied `0003_rename_agencies_to_authorities.sql` locally and remotely.
+* Added grouped admin review for scraped contact candidates on authority detail
+  pages, with actions to accept primary contacts, accept secondary contacts,
+  reject candidates, and mark an authority contact invalid.
+* Added audit events for primary accept, secondary accept, reject, invalid
+  contact decisions, and a scraper quality rejection.
+* Deployed the updated admin Worker to `admin.sunlight.nz`.
+* Tightened scraper scoring so external-domain addresses found on an authority
+  page are penalized unless they use a strong official-information local part.
+* Added `--offset` to the scraper so remote scraping can progress through all
+  authorities in controlled batches instead of repeatedly scanning the first
+  missing rows.
+* Ran two conservative remote scrape batches without Brave Search credentials:
+  `--limit 20` and `--limit 30 --offset 20`.
+* Rejected the known bad ACC candidate `info@ombudsman.parliament.nz` after the
+  scoring fix.
 
 ## Verification
 
@@ -107,9 +126,11 @@ Last verified with:
 uv run pre-commit run --files $(git ls-files --others --exclude-standard)
 uv run python -m unittest discover -s tests
 uv run python scripts/scrape_authority_contacts.py --help
-sqlite3 :memory: ".read cloudflare/migrations/0001_initial_admin_engine.sql" ".read cloudflare/migrations/0002_authority_contact_candidates.sql" ".schema sunlight_authority_contact_candidates"
+sqlite3 :memory: ".read cloudflare/migrations/0001_initial_admin_engine.sql" ".read cloudflare/migrations/0002_agency_contact_candidates.sql" ".read cloudflare/migrations/0003_rename_agencies_to_authorities.sql" ".schema sunlight_authorities" ".schema sunlight_authority_contact_candidates"
 pnpm dlx wrangler@latest d1 migrations apply sunlight-requests --local --config wrangler.jsonc
 pnpm dlx wrangler@latest d1 migrations apply sunlight-requests --remote --config wrangler.jsonc
+uv run python scripts/scrape_authority_contacts.py --remote --limit 20 --max-pages-per-authority 8 --timeout 12 --delay-ms 200
+uv run python scripts/scrape_authority_contacts.py --remote --limit 30 --offset 20 --max-pages-per-authority 8 --timeout 12 --delay-ms 200
 BRAVE_SEARCH_API_KEY=... uv run python scripts/scrape_authority_contacts.py --brave-search --source-file /tmp/sunlight-known-authorities.json --limit 8 --max-pages-per-authority 20 --timeout 8 --write-sql /tmp/sunlight-known-contact-candidates-brave.sql --delay-ms 250
 pnpm test:ts
 pnpm exec tsc --noEmit
@@ -117,6 +138,7 @@ pnpm admin:build
 pnpm authority:build
 pnpm landing:build
 pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
+pnpm dlx wrangler@latest deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --config apps/admin/wrangler.jsonc
 pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --dry-run --config apps/authority/wrangler.jsonc
 pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
 pnpm dlx wrangler@latest d1 execute sunlight-requests --remote --command "SELECT COUNT(*) AS total, SUM(contact_status = 'verified') AS verified, SUM(status = 'inactive') AS inactive FROM sunlight_authorities;"
@@ -137,6 +159,8 @@ Cloudflare resources:
 * Landing app: `sunlight.nz` and `www.sunlight.nz`
 * FYI authorities imported: 3,177
 * Verified authority contacts: 0
+* Authorities needing contact review: 6
+* Contact candidate rows: 11 candidate, 1 rejected
 * Inactive imported authorities: 238
 
 Known issue:
@@ -158,16 +182,16 @@ Important naming boundary:
 ## Next Steps
 
 1. Finish the public information scraper:
-   * Deduplicate repeated evidence rows per authority/email before SQL generation
-     or make the admin review UI group them cleanly.
+   * Review the 6 current `needs_review` authorities in `admin.sunlight.nz` and
+     accept only addresses with convincing evidence.
+   * Add a scrape-attempt ledger or status so no-result authorities are not
+     repeatedly re-crawled when working through all 3,177 records.
+   * Run larger offset-based batches, preferably with `BRAVE_SEARCH_API_KEY`
+     available for official same-site search seeding.
    * Decide how to handle form-only authorities where no public intake email is
      visible in fetched HTML.
-   * Run a small remote scrape batch.
-   * Add admin review UI for filtering `needs_review`, showing candidate
-     email/evidence/confidence, accepting primary contacts, accepting secondary
-     contacts, rejecting candidates, and marking authority contacts invalid.
-   * Add audit events for accept, reject, and invalid decisions.
-   * Only after admin review exists, allow verified contacts to feed sending.
+   * Only after contacts have been manually accepted, allow verified contacts to
+     feed sending.
 2. Wire admin pages/actions through the existing Cloudflare Access JWT validator
    so D1 admin roles are enforced inside the app as well as at the edge.
 3. Continue moving admin pages from legacy CSS classes to shadcn-style local

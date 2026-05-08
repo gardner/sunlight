@@ -14,7 +14,7 @@ CREATE TABLE admin_users (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE TABLE sunlight_authorities (
+CREATE TABLE sunlight_agencies (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   slug TEXT NOT NULL UNIQUE,
@@ -72,7 +72,7 @@ CREATE TABLE sunlight_request_cycles (
 
 CREATE TABLE sunlight_requests (
   id TEXT PRIMARY KEY,
-  authority_id TEXT NOT NULL,
+  agency_id TEXT NOT NULL,
   cycle_id TEXT NOT NULL,
   template_id TEXT NOT NULL,
   case_token_hash TEXT NOT NULL UNIQUE,
@@ -103,8 +103,8 @@ CREATE TABLE sunlight_requests (
   operator_notes TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE (authority_id, cycle_id),
-  FOREIGN KEY (authority_id) REFERENCES sunlight_authorities(id),
+  UNIQUE (agency_id, cycle_id),
+  FOREIGN KEY (agency_id) REFERENCES sunlight_agencies(id),
   FOREIGN KEY (cycle_id) REFERENCES sunlight_request_cycles(id),
   FOREIGN KEY (template_id) REFERENCES sunlight_request_templates(id)
 );
@@ -135,7 +135,7 @@ CREATE TABLE sunlight_outbound_emails (
 CREATE TABLE sunlight_responses (
   id TEXT PRIMARY KEY,
   sunlight_request_id TEXT NOT NULL,
-  authority_id TEXT NOT NULL,
+  agency_id TEXT NOT NULL,
   channel TEXT NOT NULL CHECK (channel IN ('email', 'upload', 'manual')),
   category TEXT NOT NULL CHECK (
     category IN (
@@ -156,7 +156,7 @@ CREATE TABLE sunlight_responses (
     status IN ('received', 'needs_review', 'accepted', 'held', 'duplicate', 'rejected')
   ),
   received_at TEXT NOT NULL,
-  authority_reference TEXT,
+  agency_reference TEXT,
   submitter_name TEXT,
   submitter_email TEXT,
   notes TEXT,
@@ -164,7 +164,7 @@ CREATE TABLE sunlight_responses (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   FOREIGN KEY (sunlight_request_id) REFERENCES sunlight_requests(id),
-  FOREIGN KEY (authority_id) REFERENCES sunlight_authorities(id)
+  FOREIGN KEY (agency_id) REFERENCES sunlight_agencies(id)
 );
 
 CREATE TABLE sunlight_inbound_emails (
@@ -242,7 +242,7 @@ CREATE TABLE sunlight_audit_events (
   entity_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
   actor_type TEXT NOT NULL CHECK (
-    actor_type IN ('admin', 'system', 'authority_token', 'automated_worker')
+    actor_type IN ('admin', 'system', 'agency_token', 'automated_worker')
   ),
   actor_id TEXT,
   actor_email TEXT,
@@ -250,16 +250,16 @@ CREATE TABLE sunlight_audit_events (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX idx_sunlight_authorities_status_name
-  ON sunlight_authorities (status, name);
-CREATE INDEX idx_sunlight_authorities_contact_status
-  ON sunlight_authorities (contact_status, status);
-CREATE INDEX idx_sunlight_authorities_source
-  ON sunlight_authorities (source, source_id);
+CREATE INDEX idx_sunlight_agencies_status_name
+  ON sunlight_agencies (status, name);
+CREATE INDEX idx_sunlight_agencies_contact_status
+  ON sunlight_agencies (contact_status, status);
+CREATE INDEX idx_sunlight_agencies_source
+  ON sunlight_agencies (source, source_id);
 CREATE INDEX idx_sunlight_requests_cycle_status
   ON sunlight_requests (cycle_id, status);
-CREATE INDEX idx_sunlight_requests_authority_cycle
-  ON sunlight_requests (authority_id, cycle_id);
+CREATE INDEX idx_sunlight_requests_agency_cycle
+  ON sunlight_requests (agency_id, cycle_id);
 CREATE INDEX idx_sunlight_requests_due_status
   ON sunlight_requests (expected_due_at, status);
 CREATE INDEX idx_sunlight_requests_reply_email

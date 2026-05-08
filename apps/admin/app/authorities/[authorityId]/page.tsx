@@ -1,8 +1,16 @@
 import { env } from "cloudflare:workers";
 import { notFound } from "next/navigation";
+import { listContactCandidateGroups } from "../../../lib/authority-contact-candidates";
 import { getAuthority } from "../../../lib/authorities";
 import { listTemplates } from "../../../lib/templates";
-import { assignTemplateAction, verifyContactAction } from "./actions";
+import {
+  acceptPrimaryContactCandidateAction,
+  acceptSecondaryContactCandidateAction,
+  assignTemplateAction,
+  markAuthorityContactInvalidAction,
+  rejectContactCandidateAction,
+  verifyContactAction,
+} from "./actions";
 
 interface AuthorityDetailPageProps {
   params: Promise<{ authorityId: string }>;
@@ -18,6 +26,7 @@ export default async function AuthorityDetailPage({ params }: AuthorityDetailPag
   }
 
   const templates = await listTemplates(db);
+  const candidateGroups = await listContactCandidateGroups(db, authority.id);
 
   const metadata = JSON.parse(authority.source_metadata_json) as {
     disclosure_log?: string | null;
@@ -90,6 +99,70 @@ export default async function AuthorityDetailPage({ params }: AuthorityDetailPag
               Save template
             </button>
           </form>
+          <form action={markAuthorityContactInvalidAction} className="stack">
+            <input type="hidden" name="authorityId" value={authority.id} />
+            <button className="button secondary" type="submit">
+              Mark contact invalid
+            </button>
+          </form>
+        </section>
+
+        <section className="panel">
+          <h2>Contact candidates</h2>
+          <div className="candidateList">
+            {candidateGroups.map((group) => (
+              <article className="candidateGroup" key={group.normalized_email}>
+                <div className="candidateHeader">
+                  <div>
+                    <h3>{group.normalized_email}</h3>
+                    <p>
+                      {group.confidence}% confidence from{" "}
+                      {group.candidate_count.toLocaleString()} evidence{" "}
+                      {group.candidate_count === 1 ? "row" : "rows"}
+                    </p>
+                  </div>
+                  <span className="pill">{group.status}</span>
+                </div>
+                <div className="actions">
+                  <CandidateActionForm
+                    action={acceptPrimaryContactCandidateAction}
+                    authorityId={authority.id}
+                    email={group.normalized_email}
+                    label="Accept primary"
+                  />
+                  <CandidateActionForm
+                    action={acceptSecondaryContactCandidateAction}
+                    authorityId={authority.id}
+                    email={group.normalized_email}
+                    label="Accept secondary"
+                    secondary
+                  />
+                  <CandidateActionForm
+                    action={rejectContactCandidateAction}
+                    authorityId={authority.id}
+                    email={group.normalized_email}
+                    label="Reject"
+                    secondary
+                  />
+                </div>
+                <div className="candidateEvidenceList">
+                  {group.evidence.map((evidence) => (
+                    <div className="candidateEvidence" key={evidence.id}>
+                      <div className="candidateEvidenceMeta">
+                        <strong>{evidence.confidence}%</strong>
+                        <span>{evidence.discovery_method}</span>
+                        <span>{evidence.status}</span>
+                      </div>
+                      <a href={evidence.source_url}>{evidence.source_page_title ?? evidence.source_url}</a>
+                      <p>{evidence.source_snippet ?? evidence.confidence_reason}</p>
+                      <small>{evidence.confidence_reason}</small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+            {candidateGroups.length === 0 ? <p>No scraped candidates yet.</p> : null}
+          </div>
         </section>
 
         <aside className="panel">
@@ -123,5 +196,29 @@ export default async function AuthorityDetailPage({ params }: AuthorityDetailPag
         </aside>
       </div>
     </main>
+  );
+}
+
+function CandidateActionForm({
+  action,
+  authorityId,
+  email,
+  label,
+  secondary = false,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  authorityId: string;
+  email: string;
+  label: string;
+  secondary?: boolean;
+}) {
+  return (
+    <form action={action}>
+      <input type="hidden" name="authorityId" value={authorityId} />
+      <input type="hidden" name="email" value={email} />
+      <button className={secondary ? "button secondary" : "button primary"} type="submit">
+        {label}
+      </button>
+    </form>
   );
 }

@@ -350,3 +350,67 @@ tr:last-child td {
   font-size: 13px;
   gap: 6px;
 }
+
+.candidateList {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.candidateGroup {
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.candidateHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.candidateHeader h3 {
+  font-size: 16px;
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.candidateHeader p,
+.candidateEvidence p {
+  color: #607086;
+  font-size: 13px;
+  margin: 0;
+}
+
+.candidateEvidenceList {
+  display: grid;
+  gap: 10px;
+}
+
+.candidateEvidence {
+  border-top: 1px solid #edf1f5;
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+}
+
+.candidateEvidence a {
+  overflow-wrap: anywhere;
+}
+
+.candidateEvidence small {
+  color: #607086;
+  overflow-wrap: anywhere;
+}
+
+.candidateEvidenceMeta {
+  align-items: center;
+  color: #607086;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+}

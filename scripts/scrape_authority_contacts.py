@@ -43,7 +43,6 @@ STRONG_LOCAL_PARTS = {
 MEDIUM_LOCAL_PARTS = {"admin", "contact", "enquiries", "info", "records"}
 WRONG_LOCAL_TERMS = {"careers", "hr", "jobs", "media", "news", "procurement", "recruitment", "tenders", "webmaster"}
 NO_REPLY_LOCAL_PARTS = {"bounce", "donotreply", "do-not-reply", "no-reply", "noreply"}
-
 @dataclass(frozen=True)
 class Authority:
     id: str
@@ -51,13 +50,10 @@ class Authority:
     home_page_url: str | None
     source_url: str | None
     contact_status: str
-
-
 @dataclass(frozen=True)
 class PageLink:
     url: str
     text: str
-
 
 @dataclass(frozen=True)
 class EmailCandidate:
@@ -70,12 +66,10 @@ class EmailCandidate:
     confidence: int = 0
     confidence_reason: str = "not scored"
 
-
 @dataclass(frozen=True)
 class Score:
     confidence: int
     reason: str
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Scrape public authority contact email candidates.")
@@ -84,6 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--authority-id", help="Only scrape one authority id.")
     parser.add_argument("--source-file", type=Path, help="JSON file containing authority rows.")
     parser.add_argument("--limit", type=int, default=50, help="Maximum authority rows to scrape.")
+    parser.add_argument("--offset", type=int, default=0, help="Skip matching authority rows before scraping.")
     parser.add_argument("--max-pages-per-authority", type=int, default=8, help="Maximum pages to fetch per authority.")
     parser.add_argument("--write-sql", type=Path, help="Write generated SQL to this path.")
     parser.add_argument("--dry-run", action="store_true", help="Print a summary without applying generated SQL.")
@@ -125,12 +120,13 @@ def load_authorities(args: argparse.Namespace) -> list[Authority]:
     if args.source_file:
         rows = json.loads(args.source_file.read_text())
     else:
-        rows = fetch_authority_rows(args.database, remote=args.remote, authority_id=args.authority_id, limit=args.limit)
+        rows = fetch_authority_rows(args.database, remote=args.remote, authority_id=args.authority_id, limit=args.limit, offset=args.offset)
     authorities = [authority_from_row(row) for row in rows]
-    return [authority for authority in authorities if should_scrape_authority(authority, args.authority_id)][: args.limit]
+    scrapable = [authority for authority in authorities if should_scrape_authority(authority, args.authority_id)]
+    return scrapable[args.offset : args.offset + args.limit] if args.source_file else scrapable
 
 
-def fetch_authority_rows(database: str, *, remote: bool, authority_id: str | None, limit: int) -> list[dict[str, Any]]:
+def fetch_authority_rows(database: str, *, remote: bool, authority_id: str | None, limit: int, offset: int) -> list[dict[str, Any]]:
     where = ["status = 'active'", "contact_status IN ('missing', 'needs_review', 'invalid')"]
     if authority_id:
         where.append(f"id = {sql(authority_id)}")
@@ -140,6 +136,7 @@ FROM sunlight_authorities
 WHERE {' AND '.join(where)}
 ORDER BY name
 LIMIT {int(limit)}
+OFFSET {int(offset)}
 """.strip()
     command = ["pnpm", "dlx", "wrangler@latest", "d1", "execute", database, "--json", "--command", query]
     if remote:
@@ -513,9 +510,13 @@ def score_source(
     score: int,
     reasons: list[str],
 ) -> tuple[int, list[str]]:
-    if home_page_url and domains_match(email.rsplit("@", 1)[1], urlparse(home_page_url).hostname or ""):
-        score += 10
-        reasons.append("email domain matches authority site")
+    if home_page_url:
+        if domains_match(email.rsplit("@", 1)[1], urlparse(home_page_url).hostname or ""):
+            score += 10
+            reasons.append("email domain matches authority site")
+        elif re.sub(r"[^a-z0-9]", "", email.split("@", 1)[0]) not in {part.replace(".", "") for part in STRONG_LOCAL_PARTS}:
+            score -= 30
+            reasons.append("email domain differs from authority site")
     if discovery_method in {"homepage", "linked_page"}:
         score += 5
         reasons.append("official authority source")
