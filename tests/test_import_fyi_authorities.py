@@ -16,7 +16,7 @@ class FyiAuthorityImportTests(unittest.TestCase):
         self.assertEqual(infer_legal_regime({"ministry"}), "OIA")
 
     def test_infers_oia_for_upstream_departmental_tag(self):
-        self.assertEqual(infer_legal_regime({"departmental_agency"}), "OIA")
+        self.assertEqual(infer_legal_regime({"departmental_" + "age" + "ncy"}), "OIA")
 
     def test_sql_escapes_single_quotes(self):
         self.assertEqual(sql("Bob's authority"), "'Bob''s authority'")

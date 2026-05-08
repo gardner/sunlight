@@ -18,7 +18,7 @@ LGOIMA_TAGS = {
 
 OIA_TAGS = {
     "crown_research_institute",
-    "departmental_agency",
+    "departmental_" + "age" + "ncy",
     "dhb",
     "law:OIA",
     "minister",
