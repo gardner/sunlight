@@ -47,6 +47,8 @@ Completed:
 * Deployed the agency Worker and verified a disposable live upload end to end.
 * Validated all three Vinext apps for Workers + Static Assets dry-run
   deployment.
+* Added `docs/WEB.md` with the public landing page design brief and prompt for
+  Stitch and Claude Design.
 
 ## Verification
 
@@ -100,3 +102,5 @@ Important naming boundary:
    if the R2 API token is rotated.
 4. Add multipart upload support and per-file retry/remove controls.
 5. Investigate the Vinext dev-server 404 and confirm local previews work.
+6. Generate two landing page design directions from `docs/WEB.md`, then select
+   the implementation direction for the Vinext landing app.
