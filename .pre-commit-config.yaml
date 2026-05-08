@@ -1,0 +1,14 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-mccabe
+        name: Ruff McCabe complexity
+        entry: uv run ruff check --select C901
+        language: system
+        types: [python]
+
+      - id: max-lines-per-file
+        name: Max lines per source file
+        entry: uv run python scripts/check_max_file_lines.py --max-lines=650
+        language: system
+        pass_filenames: true
