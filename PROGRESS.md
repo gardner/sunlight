@@ -139,19 +139,26 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Wire admin pages/actions through the existing Cloudflare Access JWT validator
+1. Finish the public information scraper:
+   * Apply migration `0002_agency_contact_candidates.sql` locally and remotely.
+   * Test scraper output against 5-10 known agencies using `--write-sql`, then
+     inspect generated candidates manually.
+   * Tune scoring and link selection from those real examples.
+   * Run a small remote scrape batch.
+   * Add admin review UI for filtering `needs_review`, showing candidate
+     email/evidence/confidence, accepting primary contacts, accepting secondary
+     contacts, rejecting candidates, and marking agency contacts invalid.
+   * Add audit events for accept, reject, and invalid decisions.
+   * Only after admin review exists, allow verified contacts to feed sending.
+2. Wire admin pages/actions through the existing Cloudflare Access JWT validator
    so D1 admin roles are enforced inside the app as well as at the edge.
-2. Continue moving admin pages from legacy CSS classes to shadcn-style local
+3. Continue moving admin pages from legacy CSS classes to shadcn-style local
    components.
-3. Consider replacing the agencies table/filter controls with shadcn form/table
+4. Consider replacing the agencies table/filter controls with shadcn form/table
    primitives after the base behavior has settled.
-4. Do a controlled live Cloudflare Email Sending test before sending to real
+5. Do a controlled live Cloudflare Email Sending test before sending to real
    agencies.
-5. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+6. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
-6. Add multipart upload support and per-file retry/remove controls.
-7. Investigate the Vinext dev-server 404 and confirm local previews work.
-8. Apply the contact-candidate D1 migration locally and remotely.
-9. Test the scraper against 5-10 known agencies using `--write-sql`.
-10. Apply a small remote scrape batch after reviewing the generated SQL.
-11. Add admin candidate review UI on agency detail pages.
+7. Add multipart upload support and per-file retry/remove controls.
+8. Investigate the Vinext dev-server 404 and confirm local previews work.

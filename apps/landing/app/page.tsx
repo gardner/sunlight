@@ -75,7 +75,7 @@ export default function LandingPage() {
           <p className="context">
             Sunlight is an independent project building quiet, reliable
             infrastructure for civic transparency. It is not a government
-            service, and Phase 0 does not automatically publish received files.
+            service, and received files are not automatically published.
           </p>
           <div className="hero-actions" aria-label="Landing page actions">
             <a className="button button-primary" href="#agencies">
@@ -184,9 +184,9 @@ export default function LandingPage() {
           <p className="kicker">Trust and handling</p>
           <h2>Careful by default.</h2>
           <p>
-            Phase 0 focuses on collection, provenance, and review. Raw material
-            is preserved for later processing, and sensitive or mistaken
-            submissions can be raised with Sunlight.
+            Sunlight focuses on collection, provenance, and review. Raw
+            material is preserved for later processing, and sensitive or
+            mistaken submissions can be raised with Sunlight.
           </p>
           <div className="trust-markers">
             <span>Secure storage</span>
