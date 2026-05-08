@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sunlight-requests",
+  "compatibility_date": "2026-05-09",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sunlight-requests",
+      "database_id": "796835ba-d5e5-4ad2-a931-bdf7b3a2b7dc",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "sunlight-request-artifacts"
+    }
+  ]
+}
