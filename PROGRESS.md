@@ -73,6 +73,8 @@ Completed:
   IPs with the landing Worker custom-domain DNS record.
 * Deployed the Stitch-inspired landing app to `sunlight.nz` and
   `www.sunlight.nz`.
+* Moved `sunlight.webp` into the landing app public assets and used it as the
+  hero image.
 
 ## Verification
 
@@ -139,5 +141,4 @@ Important naming boundary:
    if the R2 API token is rotated.
 6. Add multipart upload support and per-file retry/remove controls.
 7. Investigate the Vinext dev-server 404 and confirm local previews work.
-8. Replace the landing page CSS record-stack motif with a generated or supplied
-   hero image if a stronger visual asset is selected.
+8. Add the agency contact email scraper and review workflow.

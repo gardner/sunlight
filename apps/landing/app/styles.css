@@ -180,62 +180,12 @@ p {
   margin: 0;
 }
 
-.record-stack {
-  align-items: center;
-  aspect-ratio: 1;
-  background:
-    linear-gradient(135deg, rgba(0, 52, 52, 0.92), rgba(41, 103, 103, 0.58)),
-    #dde4e6;
+.archive-figure img {
+  aspect-ratio: 1672 / 941;
   border: 1px solid #bfc8c8;
   border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  overflow: hidden;
-  padding: 13%;
-  position: relative;
+  object-fit: cover;
   width: 100%;
-}
-
-.record-stack::before {
-  background: rgba(255, 255, 255, 0.12);
-  content: "";
-  height: 160%;
-  position: absolute;
-  right: 18%;
-  top: -30%;
-  transform: rotate(18deg);
-  width: 20%;
-}
-
-.record-stack::after {
-  background: #c89f61;
-  bottom: 16%;
-  content: "";
-  height: 4px;
-  left: 20%;
-  position: absolute;
-  right: 20%;
-}
-
-.record-stack span {
-  background: #fbf9f4;
-  border: 1px solid rgba(22, 29, 31, 0.18);
-  box-shadow: 0 1px 0 rgba(22, 29, 31, 0.12);
-  display: block;
-  height: 18px;
-  position: relative;
-  width: 66%;
-  z-index: 1;
-}
-
-.record-stack span:nth-child(2n) {
-  background: #eef5f7;
-  transform: translateX(4px);
-}
-
-.record-stack span:nth-child(3n) {
-  transform: translateX(-5px);
 }
 
 .archive-figure figcaption {

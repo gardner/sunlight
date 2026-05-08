@@ -86,14 +86,13 @@ export default function LandingPage() {
             </a>
           </div>
         </div>
-        <figure className="archive-figure" aria-label="Illustration of preserved records">
-          <div className="record-stack" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
+        <figure className="archive-figure">
+          <img
+            alt="A neatly stacked set of official disclosure documents in warm light"
+            height="941"
+            src="/sunlight.webp"
+            width="1672"
+          />
           <figcaption>
             Preserved with source, timing, and request provenance intact.
           </figcaption>
