@@ -15,11 +15,24 @@ export interface PreparedSunlightRequest {
   legal_regime: string;
   primary_request_email: string;
   reply_email: string;
+  request_status?: string;
   response_url: string;
   subject_template: string;
   sunlight_request_id: string;
   template_id: string;
 }
+
+export interface OutboundEmailLog {
+  agency_name: string;
+  error_message: string | null;
+  id: string;
+  sent_at: string | null;
+  status: string;
+  subject: string;
+  to_emails_json: string;
+}
+
+export type OutboundStatusSummary = Record<string, number> & { total: number };
 
 export interface RenderedSunlightRequestEmail {
   bodyText: string;
@@ -83,6 +96,22 @@ export function buildCloudflareEmailMessage(email: RenderedSunlightRequestEmail)
   };
 }
 
+export function summarizeOutboundEmailStatuses(
+  emails: Array<Pick<OutboundEmailLog, "status">>,
+): OutboundStatusSummary {
+  const summary: OutboundStatusSummary = { total: emails.length };
+  for (const email of emails) {
+    summary[email.status] = (summary[email.status] ?? 0) + 1;
+  }
+  return summary;
+}
+
+export function filterFailedPreparedRequests<T extends { request_status?: string }>(
+  requests: T[],
+): T[] {
+  return requests.filter((request) => request.request_status === "failed");
+}
+
 export async function listPreparedSunlightRequests(
   db: D1Database,
   cycleId: string,
@@ -94,6 +123,7 @@ export async function listPreparedSunlightRequests(
           sunlight_requests.id AS sunlight_request_id,
           sunlight_requests.case_token_hint,
           sunlight_requests.reply_email,
+          sunlight_requests.status AS request_status,
           sunlight_requests.response_url,
           sunlight_requests.cycle_id,
           sunlight_requests.template_id,
@@ -118,6 +148,36 @@ export async function listPreparedSunlightRequests(
     )
     .bind(cycleId)
     .all<PreparedSunlightRequest>();
+
+  return result.results;
+}
+
+export async function listCycleOutboundEmails(
+  db: D1Database,
+  cycleId: string,
+): Promise<OutboundEmailLog[]> {
+  const result = await db
+    .prepare(
+      `
+        SELECT
+          sunlight_outbound_emails.id,
+          sunlight_outbound_emails.to_emails_json,
+          sunlight_outbound_emails.subject,
+          sunlight_outbound_emails.status,
+          sunlight_outbound_emails.sent_at,
+          sunlight_outbound_emails.error_message,
+          sunlight_agencies.name AS agency_name
+        FROM sunlight_outbound_emails
+        JOIN sunlight_requests
+          ON sunlight_requests.id = sunlight_outbound_emails.sunlight_request_id
+        JOIN sunlight_agencies
+          ON sunlight_agencies.id = sunlight_requests.agency_id
+        WHERE sunlight_requests.cycle_id = ?
+        ORDER BY sunlight_outbound_emails.created_at DESC
+      `,
+    )
+    .bind(cycleId)
+    .all<OutboundEmailLog>();
 
   return result.results;
 }
@@ -242,6 +302,31 @@ export async function sendCycleSunlightRequests(
   options: { contactDetails?: string; fromEmail?: string } = {},
 ): Promise<{ failed: number; sent: number; total: number }> {
   const requests = await listPreparedSunlightRequests(db, cycleId);
+  let failed = 0;
+  let sent = 0;
+
+  await updateCycleStatus(db, cycleId, "sending");
+
+  for (const request of requests) {
+    const status = await sendPreparedSunlightRequest(db, binding, request, options);
+    if (status === "sent") {
+      sent += 1;
+    } else {
+      failed += 1;
+    }
+  }
+
+  await updateCycleStatus(db, cycleId, failed > 0 ? "previewed" : "sent");
+  return { failed, sent, total: requests.length };
+}
+
+export async function retryFailedCycleEmails(
+  db: D1Database,
+  binding: EmailSendBinding,
+  cycleId: string,
+  options: { contactDetails?: string; fromEmail?: string } = {},
+): Promise<{ failed: number; sent: number; total: number }> {
+  const requests = filterFailedPreparedRequests(await listPreparedSunlightRequests(db, cycleId));
   let failed = 0;
   let sent = 0;
 

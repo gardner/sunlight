@@ -208,15 +208,17 @@ Implemented:
 * Sent/failed status updates for outbound emails.
 * Request transition to `awaiting_response` after a successful send.
 * Audit events for queued, sent, and failed email states.
+* Admin cycle page shows outbound send results and status counts.
+* Admin can retry failed outbound emails for a cycle.
 
 Remaining:
 
 * Configure Cloudflare Email Sending domain prerequisites in the dashboard if
   the account still requires them.
 * Send a controlled live test to a verified address before sending to agencies.
-* Add an admin preview list of exactly which requests will be sent before the
-  send action is pressed.
-* Add operator-visible send results and retry controls for failed requests.
+* Add a controlled live send test before any real agency batch.
+* Store provider message IDs if Cloudflare Email Sending exposes them in the
+  binding result.
 
 ## Fourth Milestone
 

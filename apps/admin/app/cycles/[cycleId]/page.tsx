@@ -7,7 +7,16 @@ import {
   listCycleSunlightRequests,
   summarizeSunlightRequestStatuses,
 } from "../../../lib/cycles";
-import { approveCycleAction, prepareCycleAction, sendCycleAction } from "./actions";
+import {
+  listCycleOutboundEmails,
+  summarizeOutboundEmailStatuses,
+} from "../../../lib/outbound-email";
+import {
+  approveCycleAction,
+  prepareCycleAction,
+  retryFailedEmailsAction,
+  sendCycleAction,
+} from "./actions";
 
 interface CycleDetailPageProps {
   params: Promise<{ cycleId: string }>;
@@ -24,6 +33,9 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
 
   const requests = await listCycleSunlightRequests(db, cycle.id);
   const statusSummary = summarizeSunlightRequestStatuses(requests);
+  const outboundEmails = await listCycleOutboundEmails(db, cycle.id);
+  const outboundSummary = summarizeOutboundEmailStatuses(outboundEmails);
+  const hasFailedEmails = (outboundSummary.failed ?? 0) > 0;
 
   return (
     <main className="shell">
@@ -119,6 +131,66 @@ export default async function CycleDetailPage({ params }: CycleDetailPageProps) 
               {requests.length === 0 ? (
                 <tr>
                   <td colSpan={5}>No SunlightRequests have been prepared for this cycle.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel stack">
+        <div>
+          <p className="eyebrow">Send results</p>
+          <h2>Outbound emails</h2>
+        </div>
+        <div className="actions">
+          <form action={retryFailedEmailsAction}>
+            <input type="hidden" name="cycleId" value={cycle.id} />
+            <button className="button" disabled={!hasFailedEmails} type="submit">
+              Retry failed emails
+            </button>
+          </form>
+        </div>
+        <div className="grid">
+          <div className="metric">
+            <span>Total</span>
+            <strong>{outboundSummary.total}</strong>
+          </div>
+          {Object.entries(outboundSummary)
+            .filter(([status]) => status !== "total")
+            .map(([status, count]) => (
+              <div className="metric" key={status}>
+                <span>{status}</span>
+                <strong>{count}</strong>
+              </div>
+            ))}
+        </div>
+        <div className="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Agency</th>
+                <th>Recipients</th>
+                <th>Status</th>
+                <th>Sent</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {outboundEmails.map((email) => (
+                <tr key={email.id}>
+                  <td>{email.agency_name}</td>
+                  <td>{email.to_emails_json}</td>
+                  <td>
+                    <span className="pill">{email.status}</span>
+                  </td>
+                  <td>{email.sent_at}</td>
+                  <td>{email.error_message}</td>
+                </tr>
+              ))}
+              {outboundEmails.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>No outbound emails have been queued for this cycle.</td>
                 </tr>
               ) : null}
             </tbody>

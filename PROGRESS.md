@@ -37,6 +37,7 @@ Completed:
 * Added outbound email rendering, queueing, sending, status updates, and audit
   events.
 * Added cycle send preview with request status counts.
+* Added outbound send results and failed-email retry controls.
 * Added agency response metadata submission.
 * Added direct-to-R2 presigned upload session and completion routes.
 * Configured R2 CORS for browser uploads from `requests.sunlight.nz`.
@@ -91,9 +92,7 @@ Important naming boundary:
    issuer/audience values as Worker secrets.
 2. Do a controlled live Cloudflare Email Sending test before sending to real
    agencies.
-3. Add operator-visible send results and retry controls for failed outbound
-   emails.
-4. Configure R2 S3 API credentials for the agency Worker and run a live upload
+3. Configure R2 S3 API credentials for the agency Worker and run a live upload
    test against a disposable token.
-5. Add multipart upload support and per-file retry/remove controls.
-6. Investigate the Vinext dev-server 404 and confirm local previews work.
+4. Add multipart upload support and per-file retry/remove controls.
+5. Investigate the Vinext dev-server 404 and confirm local previews work.

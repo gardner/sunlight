@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCloudflareEmailMessage,
+  filterFailedPreparedRequests,
   renderSunlightRequestEmail,
+  summarizeOutboundEmailStatuses,
   type PreparedSunlightRequest,
 } from "./outbound-email";
 
@@ -62,5 +64,30 @@ describe("buildCloudflareEmailMessage", () => {
         "Tena koe The Treasury,\n\nPlease provide requests and responses for 2026-05-01 to 2026-05-31.\n\nUpload large files at https://requests.sunlight.nz/response/abc123.",
       to: ["oia@example.govt.nz"],
     });
+  });
+});
+
+describe("outbound send results", () => {
+  it("summarizes outbound email statuses", () => {
+    expect(
+      summarizeOutboundEmailStatuses([
+        { status: "sent" },
+        { status: "sent" },
+        { status: "failed" },
+      ]),
+    ).toEqual({
+      failed: 1,
+      sent: 2,
+      total: 3,
+    });
+  });
+
+  it("filters failed prepared requests for retry", () => {
+    expect(
+      filterFailedPreparedRequests([
+        { ...preparedRequest, request_status: "failed" },
+        { ...preparedRequest, sunlight_request_id: "srq_2", request_status: "scheduled" },
+      ]),
+    ).toEqual([{ ...preparedRequest, request_status: "failed" }]);
   });
 });

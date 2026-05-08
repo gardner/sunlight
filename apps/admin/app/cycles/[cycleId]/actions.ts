@@ -3,7 +3,10 @@
 import { env } from "cloudflare:workers";
 import { redirect } from "next/navigation";
 import { approveCycle, getCycle, prepareCycleRequests, canSendCycle } from "../../../lib/cycles";
-import { sendCycleSunlightRequests } from "../../../lib/outbound-email";
+import {
+  retryFailedCycleEmails,
+  sendCycleSunlightRequests,
+} from "../../../lib/outbound-email";
 
 export async function prepareCycleAction(formData: FormData) {
   const cycleId = String(formData.get("cycleId") ?? "");
@@ -26,6 +29,17 @@ export async function sendCycleAction(formData: FormData) {
   }
 
   await sendCycleSunlightRequests(cloudflareEnv.DB, cloudflareEnv.EMAIL, cycleId, {
+    contactDetails: cloudflareEnv.SUNLIGHT_CONTACT_DETAILS,
+    fromEmail: cloudflareEnv.SUNLIGHT_FROM_EMAIL,
+  });
+  redirect(`/cycles/${cycleId}`);
+}
+
+export async function retryFailedEmailsAction(formData: FormData) {
+  const cycleId = String(formData.get("cycleId") ?? "");
+  const cloudflareEnv = env as unknown as CloudflareEnv;
+
+  await retryFailedCycleEmails(cloudflareEnv.DB, cloudflareEnv.EMAIL, cycleId, {
     contactDetails: cloudflareEnv.SUNLIGHT_CONTACT_DETAILS,
     fromEmail: cloudflareEnv.SUNLIGHT_FROM_EMAIL,
   });
