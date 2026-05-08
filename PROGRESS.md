@@ -2,8 +2,9 @@
 
 ## Current Slice
 
-The request preparation slice is complete and the outbound email slice is
-implemented through dry-run deployment validation.
+The agency contact scraper first slice is complete. The request preparation
+slice and outbound email slice remain implemented through dry-run deployment
+validation.
 
 Completed:
 
@@ -75,6 +76,13 @@ Completed:
   `www.sunlight.nz`.
 * Moved `sunlight.webp` into the landing app public assets and used it as the
   hero image.
+* Added `curl_cffi` and `beautifulsoup4` for the agency contact scraper.
+* Added D1 migration `0002_agency_contact_candidates.sql` for scraped contact
+  candidates.
+* Added tested Python helpers for email normalization, extraction, candidate
+  link selection, scoring, and SQL generation.
+* Added `scripts/scrape_agency_contacts.py` with conservative dry-run,
+  `--write-sql`, `--source-file`, and remote D1 apply support.
 
 ## Verification
 
@@ -83,6 +91,8 @@ Last verified with:
 ```bash
 uv run pre-commit run --files $(git ls-files --others --exclude-standard)
 uv run python -m unittest discover -s tests
+uv run python scripts/scrape_agency_contacts.py --help
+sqlite3 :memory: ".read cloudflare/migrations/0001_initial_admin_engine.sql" ".read cloudflare/migrations/0002_agency_contact_candidates.sql" ".schema sunlight_agency_contact_candidates"
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm admin:build
@@ -141,4 +151,7 @@ Important naming boundary:
    if the R2 API token is rotated.
 6. Add multipart upload support and per-file retry/remove controls.
 7. Investigate the Vinext dev-server 404 and confirm local previews work.
-8. Add the agency contact email scraper and review workflow.
+8. Apply the contact-candidate D1 migration locally and remotely.
+9. Test the scraper against 5-10 known agencies using `--write-sql`.
+10. Apply a small remote scrape batch after reviewing the generated SQL.
+11. Add admin candidate review UI on agency detail pages.
