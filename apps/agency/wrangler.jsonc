@@ -3,6 +3,10 @@
   "name": "sunlight-agency",
   "compatibility_date": "2026-05-09",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "R2_BUCKET_NAME": "sunlight-request-artifacts",
+    "R2_PRESIGN_EXPIRES_SECONDS": "900"
+  },
   "routes": [
     {
       "pattern": "requests.sunlight.nz",

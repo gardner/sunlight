@@ -43,6 +43,13 @@ Worker secrets and variables:
   Defaults to `requests@sunlight.nz`.
 * `SUNLIGHT_CONTACT_DETAILS`: optional footer/contact text for request
   templates.
+* `R2_ACCOUNT_ID`: Cloudflare account id used to build R2 S3 presigned URLs.
+* `R2_ACCESS_KEY_ID`: R2 S3 API access key id for presigned uploads.
+* `R2_SECRET_ACCESS_KEY`: R2 S3 API secret access key for presigned uploads.
+* `R2_BUCKET_NAME`: R2 bucket name. Defaults in agency Wrangler config to
+  `sunlight-request-artifacts`.
+* `R2_PRESIGN_EXPIRES_SECONDS`: presigned upload URL lifetime. Defaults in
+  agency Wrangler config to `900`.
 
 The admin Worker has a Cloudflare Email Sending binding named `EMAIL`. Its
 Wrangler config restricts senders to `requests@sunlight.nz`; dynamic reply
@@ -231,15 +238,22 @@ Implemented:
 * Invalid `case_token` returns a 404.
 * Valid `case_token` resolves by SHA-256 token hash.
 * Valid response page shows agency, cycle period, reply email, and upload
-  status placeholder.
+  form.
+* Agencies can submit response metadata.
+* Upload session route creates D1 upload session and upload rows.
+* Upload route returns direct-to-R2 presigned `PUT` URLs.
+* Upload completion route verifies the object exists in R2 and marks D1 upload
+  state complete.
+* R2 bucket CORS allows browser `PUT` uploads from `https://requests.sunlight.nz`.
 
 Remaining:
 
-* Response metadata form.
-* Upload session creation.
-* R2 direct-upload URL generation.
-* Upload completion callback/finalization.
-* `sunlight_responses` creation/update.
+* Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` for
+  the deployed agency Worker.
+* Run a live browser upload test against a disposable token.
+* Add multipart upload support for files that need resumability or exceed the
+  single-`PUT` operating limit.
+* Add clearer per-file retry/remove controls.
 
 ## Fifth Milestone
 

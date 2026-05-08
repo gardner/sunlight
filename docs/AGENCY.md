@@ -123,6 +123,23 @@ Recommended flow:
 
 For very large files, implement multipart upload rather than a single `PUT`.
 
+Phase 0 implementation currently supports direct single-`PUT` presigned uploads.
+The Worker creates D1 `sunlight_upload_sessions` and `sunlight_uploads` rows,
+returns a presigned R2 URL, and marks the upload complete after the browser
+confirms and the Worker can `head()` the R2 object. Multipart upload support is
+reserved for the next upload hardening slice.
+
+Required deployed Worker configuration:
+
+* `R2_ACCOUNT_ID`
+* `R2_ACCESS_KEY_ID`
+* `R2_SECRET_ACCESS_KEY`
+* `R2_BUCKET_NAME`
+* `R2_PRESIGN_EXPIRES_SECONDS`
+
+The R2 bucket must also allow CORS from `https://requests.sunlight.nz` for
+browser `PUT` uploads with the `Content-Type` header.
+
 ## Accepted Files
 
 Phase 0 should accept common response material:

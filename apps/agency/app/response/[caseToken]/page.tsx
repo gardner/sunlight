@@ -1,42 +1,18 @@
 import { env } from "cloudflare:workers";
 import { notFound } from "next/navigation";
-import { sha256Hex } from "../../../lib/tokens";
+import { getSunlightRequestByToken } from "../../../lib/response-intake";
+import { submitResponseAction } from "./actions";
+import { UploadPanel } from "./UploadPanel";
 
 interface ResponsePageProps {
   params: Promise<{ caseToken: string }>;
+  searchParams?: Promise<{ submitted?: string }>;
 }
 
-export default async function ResponsePage({ params }: ResponsePageProps) {
+export default async function ResponsePage({ params, searchParams }: ResponsePageProps) {
   const { caseToken } = await params;
-  const tokenHash = await sha256Hex(caseToken);
-  const request = await (env as unknown as CloudflareEnv).DB.prepare(
-    `
-      SELECT
-        sunlight_requests.id,
-        sunlight_requests.case_token_hint,
-        sunlight_requests.reply_email,
-        sunlight_requests.status,
-        sunlight_agencies.name AS agency_name,
-        sunlight_request_cycles.cycle_month,
-        sunlight_request_cycles.covered_from,
-        sunlight_request_cycles.covered_until
-      FROM sunlight_requests
-      JOIN sunlight_agencies ON sunlight_agencies.id = sunlight_requests.agency_id
-      JOIN sunlight_request_cycles ON sunlight_request_cycles.id = sunlight_requests.cycle_id
-      WHERE sunlight_requests.case_token_hash = ?
-      LIMIT 1
-    `,
-  )
-    .bind(tokenHash)
-    .first<{
-      agency_name: string;
-      case_token_hint: string;
-      covered_from: string;
-      covered_until: string;
-      cycle_month: string;
-      reply_email: string;
-      status: string;
-    }>();
+  const request = await getSunlightRequestByToken((env as unknown as CloudflareEnv).DB, caseToken);
+  const submitted = (await searchParams)?.submitted === "1";
 
   if (!request) {
     notFound();
@@ -62,9 +38,47 @@ export default async function ResponsePage({ params }: ResponsePageProps) {
           <dd>{request.reply_email}</dd>
         </div>
       </dl>
-      <p>
-        Uploads are not enabled yet. For now, reply to the email address above.
-      </p>
+      {submitted ? (
+        <div className="notice">Response details saved. Sunlight will review the submission.</div>
+      ) : null}
+      <UploadPanel caseToken={caseToken} />
+      <section className="panel stack">
+        <div>
+          <p className="eyebrow">Final details</p>
+          <h2>Submit response metadata</h2>
+        </div>
+        <form action={submitResponseAction} className="stack">
+          <input name="caseToken" type="hidden" value={caseToken} />
+          <label>
+            Response type
+            <select defaultValue="full_response" name="category">
+              <option value="full_response">Complete response</option>
+              <option value="partial_response">Partial response</option>
+              <option value="no_records_held">No records held</option>
+              <option value="follow_up">Will respond separately by email</option>
+            </select>
+          </label>
+          <label>
+            Agency reference
+            <input name="agencyReference" />
+          </label>
+          <label>
+            Contact name
+            <input name="submitterName" />
+          </label>
+          <label>
+            Contact email
+            <input name="submitterEmail" type="email" />
+          </label>
+          <label>
+            Notes
+            <textarea name="notes" rows={5} />
+          </label>
+          <button className="button" type="submit">
+            Submit response details
+          </button>
+        </form>
+      </section>
     </main>
   );
 }
