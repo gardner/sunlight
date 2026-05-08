@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "sunlight-landing",
+  "compatibility_date": "2026-05-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "sunlight.nz",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.sunlight.nz",
+      "custom_domain": true
+    }
+  ]
+}
