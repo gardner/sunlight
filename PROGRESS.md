@@ -83,6 +83,18 @@ Completed:
   link selection, scoring, and SQL generation.
 * Added `scripts/scrape_agency_contacts.py` with conservative dry-run,
   `--write-sql`, `--source-file`, and remote D1 apply support.
+* Deployed the updated landing app to `sunlight.nz` and `www.sunlight.nz`.
+* Applied contact-candidate migration `0002_agency_contact_candidates.sql`
+  locally and remotely.
+* Added Brave Search seeding for official same-site contact discovery using
+  `BRAVE_SEARCH_API_KEY`, one search request per agency.
+* Reworked scraper discovery to prefer Brave-seeded official pages, then expand
+  only high-value same-site contact/OIA/privacy/request links.
+* Added progress logging and slow-fetch warnings so stuck crawlers can be
+  identified by agency and URL.
+* Tested scraper output against known agencies using `--write-sql`; strong
+  candidates were found for Auckland Council, Ministry of Justice, and
+  Wellington City Council.
 
 ## Verification
 
@@ -93,6 +105,9 @@ uv run pre-commit run --files $(git ls-files --others --exclude-standard)
 uv run python -m unittest discover -s tests
 uv run python scripts/scrape_agency_contacts.py --help
 sqlite3 :memory: ".read cloudflare/migrations/0001_initial_admin_engine.sql" ".read cloudflare/migrations/0002_agency_contact_candidates.sql" ".schema sunlight_agency_contact_candidates"
+pnpm dlx wrangler@latest d1 migrations apply sunlight-requests --local --config wrangler.jsonc
+pnpm dlx wrangler@latest d1 migrations apply sunlight-requests --remote --config wrangler.jsonc
+BRAVE_SEARCH_API_KEY=... uv run python scripts/scrape_agency_contacts.py --brave-search --source-file /tmp/sunlight-known-agencies.json --limit 8 --max-pages-per-agency 20 --timeout 8 --write-sql /tmp/sunlight-known-contact-candidates-brave.sql --delay-ms 250
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm admin:build
@@ -140,10 +155,10 @@ Important naming boundary:
 ## Next Steps
 
 1. Finish the public information scraper:
-   * Apply migration `0002_agency_contact_candidates.sql` locally and remotely.
-   * Test scraper output against 5-10 known agencies using `--write-sql`, then
-     inspect generated candidates manually.
-   * Tune scoring and link selection from those real examples.
+   * Deduplicate repeated evidence rows per agency/email before SQL generation
+     or make the admin review UI group them cleanly.
+   * Decide how to handle form-only agencies where no public intake email is
+     visible in fetched HTML.
    * Run a small remote scrape batch.
    * Add admin review UI for filtering `needs_review`, showing candidate
      email/evidence/confidence, accepting primary contacts, accepting secondary

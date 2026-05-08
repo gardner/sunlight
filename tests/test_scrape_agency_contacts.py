@@ -5,6 +5,7 @@ from scripts.scrape_agency_contacts import (
     build_scrape_sql,
     candidate_id,
     discover_page_emails,
+    fetch_agency_pages,
     find_candidate_links,
     normalize_email,
     score_email,
@@ -47,8 +48,9 @@ class AgencyContactScraperTests(unittest.TestCase):
         )
         self.assertEqual(emails[0].source_page_title, "Official information")
 
-    def test_selects_high_value_same_site_links(self):
+    def test_prioritizes_oia_links_over_generic_same_site_links(self):
         html = """
+        <a href="/about">About</a>
         <a href="/contact-us">Contact us</a>
         <a href="https://example.govt.nz/oia">OIA</a>
         <a href="https://facebook.com/example">Facebook</a>
@@ -60,7 +62,48 @@ class AgencyContactScraperTests(unittest.TestCase):
 
         self.assertEqual(
             [link.url for link in links],
-            ["https://example.govt.nz/contact-us", "https://example.govt.nz/oia"],
+            [
+                "https://example.govt.nz/oia",
+                "https://example.govt.nz/contact-us",
+            ],
+        )
+
+    def test_fetches_links_discovered_from_linked_pages_within_page_cap(self):
+        session = FakeSession(
+            {
+                "https://example.govt.nz/": """
+                  <a href="/about">About</a>
+                  <a href="/contact-us">Contact us</a>
+                """,
+                "https://example.govt.nz/contact-us": """
+                  <a href="/official-information-act-requests">OIA requests</a>
+                """,
+                "https://example.govt.nz/official-information-act-requests": """
+                  OIA email: oia@example.govt.nz
+                """,
+            },
+        )
+
+        pages = fetch_agency_pages(
+            Agency(
+                id="agy_1",
+                name="Example",
+                home_page_url="https://example.govt.nz/",
+                source_url=None,
+                contact_status="missing",
+            ),
+            session=session,
+            timeout=20,
+            max_pages=3,
+        )
+
+        self.assertEqual(
+            [page[1] for page in pages],
+            [
+                "https://example.govt.nz/",
+                "https://example.govt.nz/contact-us",
+                "https://example.govt.nz/official-information-act-requests",
+            ],
         )
 
     def test_scores_oia_candidate_with_explainable_reasons(self):
@@ -76,6 +119,19 @@ class AgencyContactScraperTests(unittest.TestCase):
         self.assertGreaterEqual(score.confidence, 80)
         self.assertIn("strong local part", score.reason)
         self.assertIn("source URL", score.reason)
+
+    def test_scores_official_information_as_role_address_not_person(self):
+        score = score_email(
+            "official.information@wcc.govt.nz",
+            source_url="https://wellington.govt.nz/contact-us/information-requests",
+            source_page_title="Make an official information request",
+            source_snippet="official.information@wcc.govt.nz",
+            home_page_url="https://wellington.govt.nz",
+            discovery_method="linked_page",
+        )
+
+        self.assertGreaterEqual(score.confidence, 70)
+        self.assertNotIn("personal-looking", score.reason)
 
     def test_builds_candidate_upsert_sql_and_review_status_update(self):
         agency = Agency(
@@ -98,6 +154,21 @@ class AgencyContactScraperTests(unittest.TestCase):
         self.assertIn("ON CONFLICT(agency_id, normalized_email, source_url) DO UPDATE", generated)
         self.assertIn("contact_status = 'needs_review'", generated)
         self.assertNotIn("primary_request_email", generated)
+
+
+class FakeResponse:
+    def __init__(self, text):
+        self.text = text
+        self.status_code = 200
+        self.headers = {"content-type": "text/html"}
+
+
+class FakeSession:
+    def __init__(self, pages):
+        self.pages = pages
+
+    def get(self, url, **_kwargs):
+        return FakeResponse(self.pages[url])
 
 
 if __name__ == "__main__":
