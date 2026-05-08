@@ -49,6 +49,12 @@ Completed:
   deployment.
 * Added `docs/WEB.md` with the public landing page design brief and prompt for
   Stitch and Claude Design.
+* Enabled Cloudflare Zero Trust Access for the Sunlight account.
+* Created the `admin.sunlight.nz` self-hosted Access application.
+* Added an Access allow policy for bootstrap admin `sunlight@spunts.net`.
+* Stored `CF_ACCESS_AUD`, `CF_ACCESS_ISSUER`, and `CF_ACCESS_JWKS_URL` as admin
+  Worker secrets.
+* Deployed the admin Worker to the Access-protected custom domain.
 
 ## Verification
 
@@ -75,6 +81,9 @@ Cloudflare resources:
 * D1 database: `sunlight-requests`
 * D1 database id: `796835ba-d5e5-4ad2-a931-bdf7b3a2b7dc`
 * R2 bucket: `sunlight-request-artifacts`
+* Zero Trust organization: `Sunlight`
+* Access auth domain: `sunlight-nz.cloudflareaccess.com`
+* Access-protected admin app: `admin.sunlight.nz`
 * FYI authorities imported: 3,177
 * Verified agency contacts: 0
 * Inactive imported agencies: 238
@@ -84,6 +93,9 @@ Known issue:
 * `vinext build` succeeds for all three apps, but `vinext dev` currently returns
   404 for `/`. Investigate Vinext dev-server routing before relying on local
   browser previews.
+* The local resolver in this workspace did not resolve `admin.sunlight.nz`
+  immediately after deployment, but Cloudflare's public resolver did and the
+  Cloudflare edge returned the expected Access login redirect.
 
 Important naming boundary:
 
@@ -94,8 +106,8 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Configure Cloudflare Access for `admin.sunlight.nz` and add the Access
-   issuer/audience values as Worker secrets.
+1. Wire admin pages/actions through the existing Cloudflare Access JWT validator
+   so D1 admin roles are enforced inside the app as well as at the edge.
 2. Do a controlled live Cloudflare Email Sending test before sending to real
    agencies.
 3. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
