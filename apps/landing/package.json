@@ -6,6 +6,6 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "deploy": "vinext deploy --name sunlight-landing"
+    "deploy": "pnpm build && wrangler deploy dist/server/ssr/index.js --assets dist/client --config wrangler.jsonc"
   }
 }

@@ -85,10 +85,11 @@ wrangler.jsonc
 
 Each Vinext app is deployed as Workers + Static Assets:
 
-* server bundle: `dist/server/index.js`
+* worker entry: `dist/server/ssr/index.js`
+* RSC server bundle imported by the worker entry: `dist/server/index.js`
 * static assets: `dist/client`
 
-Build before deploying, then pass the generated server bundle and assets
+Build before deploying, then pass the generated worker entry and assets
 directory to Wrangler explicitly. Do not add `main: "dist/server/index.js"` to
 the app Wrangler files; Vinext reads Wrangler config during build, and pointing
 it at previous `dist` output causes recursive build failures.
@@ -97,17 +98,17 @@ it at previous `dist` output causes recursive build failures.
 pnpm admin:build
 pnpm agency:build
 pnpm landing:build
-pnpm exec wrangler deploy apps/admin/dist/server/index.js --assets apps/admin/dist/client --config apps/admin/wrangler.jsonc
-pnpm exec wrangler deploy apps/agency/dist/server/index.js --assets apps/agency/dist/client --config apps/agency/wrangler.jsonc
-pnpm exec wrangler deploy apps/landing/dist/server/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
+pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --config apps/admin/wrangler.jsonc
+pnpm exec wrangler deploy apps/agency/dist/server/ssr/index.js --assets apps/agency/dist/client --config apps/agency/wrangler.jsonc
+pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
 ```
 
 Dry-run deployment checks:
 
 ```bash
-pnpm exec wrangler deploy apps/admin/dist/server/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
-pnpm exec wrangler deploy apps/agency/dist/server/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
-pnpm exec wrangler deploy apps/landing/dist/server/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
+pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
+pnpm exec wrangler deploy apps/agency/dist/server/ssr/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
+pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
 ```
 
 ## First Milestone
@@ -252,7 +253,6 @@ Remaining:
 
 * Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` for
   the deployed agency Worker.
-* Run a live browser upload test against a disposable token.
 * Add multipart upload support for files that need resumability or exceed the
   single-`PUT` operating limit.
 * Add clearer per-file retry/remove controls.
@@ -295,9 +295,9 @@ pnpm exec tsc --noEmit
 pnpm admin:build
 pnpm agency:build
 pnpm landing:build
-pnpm exec wrangler deploy apps/admin/dist/server/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
-pnpm exec wrangler deploy apps/agency/dist/server/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
-pnpm exec wrangler deploy apps/landing/dist/server/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
+pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
+pnpm exec wrangler deploy apps/agency/dist/server/ssr/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
+pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
 ```
 
 Before committing, install and run the shared hooks:

@@ -42,6 +42,9 @@ Completed:
 * Added agency response metadata submission.
 * Added direct-to-R2 presigned upload session and completion routes.
 * Configured R2 CORS for browser uploads from `requests.sunlight.nz`.
+* Created R2 S3 credentials for agency uploads and stored them in `.env`.
+* Added the R2 S3 credentials as agency Worker secrets.
+* Deployed the agency Worker and verified a disposable live upload end to end.
 * Validated all three Vinext apps for Workers + Static Assets dry-run
   deployment.
 
@@ -57,9 +60,9 @@ pnpm exec tsc --noEmit
 pnpm admin:build
 pnpm agency:build
 pnpm landing:build
-pnpm exec wrangler deploy apps/admin/dist/server/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
-pnpm exec wrangler deploy apps/agency/dist/server/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
-pnpm exec wrangler deploy apps/landing/dist/server/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
+pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
+pnpm exec wrangler deploy apps/agency/dist/server/ssr/index.js --assets apps/agency/dist/client --dry-run --config apps/agency/wrangler.jsonc
+pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
 pnpm dlx wrangler@latest d1 execute sunlight-requests --remote --command "SELECT COUNT(*) AS total, SUM(contact_status = 'verified') AS verified, SUM(status = 'inactive') AS inactive FROM sunlight_agencies;"
 ```
 
@@ -93,7 +96,7 @@ Important naming boundary:
    issuer/audience values as Worker secrets.
 2. Do a controlled live Cloudflare Email Sending test before sending to real
    agencies.
-3. Configure R2 S3 API credentials for the agency Worker and run a live upload
-   test against a disposable token.
+3. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+   if the R2 API token is rotated.
 4. Add multipart upload support and per-file retry/remove controls.
 5. Investigate the Vinext dev-server 404 and confirm local previews work.
