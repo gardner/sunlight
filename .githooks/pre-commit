@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+uv run pre-commit run --hook-stage pre-commit
