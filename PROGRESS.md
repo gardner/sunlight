@@ -59,6 +59,12 @@ Completed:
   provider.
 * Verified the `admin.sunlight.nz` Access login page renders the email code
   form.
+* Changed the admin Access application session cookie SameSite setting from
+  `strict` to `lax` to avoid post-login redirect loops from the
+  `cloudflareaccess.com` auth domain back to `admin.sunlight.nz`.
+* Added shadcn/Tailwind v4 plumbing for the admin Vinext app.
+* Converted the admin dashboard overview to local shadcn-style `Button`, `Card`,
+  and `Badge` components.
 
 ## Verification
 
@@ -89,6 +95,7 @@ Cloudflare resources:
 * Access auth domain: `sunlight-nz.cloudflareaccess.com`
 * Access identity provider: One-time PIN login
 * Access-protected admin app: `admin.sunlight.nz`
+* Admin UI component system: shadcn-style local components with Tailwind v4
 * FYI authorities imported: 3,177
 * Verified agency contacts: 0
 * Inactive imported agencies: 238
@@ -113,11 +120,13 @@ Important naming boundary:
 
 1. Wire admin pages/actions through the existing Cloudflare Access JWT validator
    so D1 admin roles are enforced inside the app as well as at the edge.
-2. Do a controlled live Cloudflare Email Sending test before sending to real
+2. Continue moving admin pages from legacy CSS classes to shadcn-style local
+   components.
+3. Do a controlled live Cloudflare Email Sending test before sending to real
    agencies.
-3. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+4. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
-4. Add multipart upload support and per-file retry/remove controls.
-5. Investigate the Vinext dev-server 404 and confirm local previews work.
-6. Generate two landing page design directions from `docs/WEB.md`, then select
+5. Add multipart upload support and per-file retry/remove controls.
+6. Investigate the Vinext dev-server 404 and confirm local previews work.
+7. Generate two landing page design directions from `docs/WEB.md`, then select
    the implementation direction for the Vinext landing app.

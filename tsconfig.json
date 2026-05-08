@@ -11,7 +11,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "types": ["@cloudflare/workers-types"]
+    "types": ["@cloudflare/workers-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@admin/*": ["apps/admin/*"]
+    }
   },
   "include": ["apps/**/*.ts", "apps/**/*.tsx", "apps/**/*.d.ts"]
 }
