@@ -173,6 +173,10 @@ tr:last-child td {
   border-bottom: 0;
 }
 
+.dangerRow td {
+  background: #fff3f1;
+}
+
 .pill {
   background: #eef3f7;
   border-radius: 999px;

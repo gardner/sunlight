@@ -278,6 +278,8 @@ Acceptance criteria:
 * Do not create `disclosed_*` records in Phase 0.
 * Do not store raw email bodies or file contents in audit events.
 * Compute overdue state from request due dates and response state.
+* Surface overdue `SunlightRequest` records in admin summary and the request
+  operations list.
 * Keep raw artifacts immutable from normal application workflows.
 * Use TDD where practical.
 * Run shared hooks before committing.

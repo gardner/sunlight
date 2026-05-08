@@ -21,6 +21,9 @@ export default async function AdminDashboard() {
           <a className="button" href="/cycles">
             Cycles
           </a>
+          <a className="button" href="/requests">
+            Requests
+          </a>
         </nav>
       </header>
 

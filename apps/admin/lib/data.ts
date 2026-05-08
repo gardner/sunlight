@@ -1,9 +1,11 @@
+import { countOverdueSunlightRequests } from "./sunlight-requests";
+
 export interface SummaryItem {
   label: string;
   value: number;
 }
 
-const SUMMARY_QUERIES = [
+const STATIC_SUMMARY_QUERIES = [
   {
     label: "Agencies",
     sql: "SELECT COUNT(*) AS count FROM sunlight_agencies",
@@ -31,8 +33,8 @@ const SUMMARY_QUERIES = [
 ] as const;
 
 export async function getAdminSummary(db: D1Database): Promise<SummaryItem[]> {
-  return Promise.all(
-    SUMMARY_QUERIES.map(async (query) => {
+  const items = await Promise.all(
+    STATIC_SUMMARY_QUERIES.map(async (query) => {
       const row = await db.prepare(query.sql).first<{ count: number }>();
       return {
         label: query.label,
@@ -40,4 +42,11 @@ export async function getAdminSummary(db: D1Database): Promise<SummaryItem[]> {
       };
     }),
   );
+  const overdue = await countOverdueRequests(db);
+  return [...items, { label: "Overdue requests", value: overdue }];
+}
+
+async function countOverdueRequests(db: D1Database): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  return countOverdueSunlightRequests(db, today);
 }

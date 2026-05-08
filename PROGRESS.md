@@ -38,6 +38,7 @@ Completed:
   events.
 * Added cycle send preview with request status counts.
 * Added outbound send results and failed-email retry controls.
+* Added overdue SunlightRequest summary and admin `/requests` list.
 * Added agency response metadata submission.
 * Added direct-to-R2 presigned upload session and completion routes.
 * Configured R2 CORS for browser uploads from `requests.sunlight.nz`.
