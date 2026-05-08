@@ -55,6 +55,10 @@ Completed:
 * Stored `CF_ACCESS_AUD`, `CF_ACCESS_ISSUER`, and `CF_ACCESS_JWKS_URL` as admin
   Worker secrets.
 * Deployed the admin Worker to the Access-protected custom domain.
+* Added Cloudflare Access One-time PIN login as the Zero Trust identity
+  provider.
+* Verified the `admin.sunlight.nz` Access login page renders the email code
+  form.
 
 ## Verification
 
@@ -83,6 +87,7 @@ Cloudflare resources:
 * R2 bucket: `sunlight-request-artifacts`
 * Zero Trust organization: `Sunlight`
 * Access auth domain: `sunlight-nz.cloudflareaccess.com`
+* Access identity provider: One-time PIN login
 * Access-protected admin app: `admin.sunlight.nz`
 * FYI authorities imported: 3,177
 * Verified agency contacts: 0
