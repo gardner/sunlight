@@ -2,47 +2,47 @@ const processSteps = [
   {
     marker: "01",
     title: "Request",
-    body: "Sends recurring OIA/LGOIMA requests to selected public agencies.",
+    body: "Sunlight sends recurring OIA and LGOIMA requests to selected public agencies.",
   },
   {
     marker: "02",
     title: "Receive",
-    body: "Intakes material by reply email or a unique upload link for large files.",
+    body: "Agencies reply by email or use a secure upload link for larger files.",
   },
   {
     marker: "03",
     title: "Preserve",
-    body: "Stores files, emails, and metadata with a clear provenance trail.",
+    body: "Responses, attachments, and key metadata are stored together so the source and timing remain clear.",
   },
   {
     marker: "04",
     title: "Prepare",
-    body: "Keeps material ready for later review, search, and responsible reuse.",
+    body: "Material is prepared for review, search, and responsible public use.",
   },
 ];
 
 const publicValue = [
-  "Disclosure material is public infrastructure.",
-  "Recurring collection reduces fragmentation across agencies.",
-  "Preserved material can support journalism, research, and civic technology.",
+  "Official information responses are often scattered across inboxes, release pages, and one-off exchanges. That makes them hard to find and easy to lose.",
+  "Sunlight helps preserve these records in one place so they can be reviewed, searched, and reused more easily.",
+  "Bringing this material together supports journalism, research, public understanding, and civic technology.",
 ];
 
 const agencyItems = [
   {
-    title: "Respond directly",
-    body: "Use the unique link or reply address in the Sunlight request email.",
+    title: "Reply by email",
+    body: "Use the reply address shown in the request email.",
   },
   {
-    title: "Large files supported",
-    body: "Transfer substantial response packages through the unique upload page.",
+    title: "Send large files",
+    body: "If the response package is too large for email, use the secure upload link provided.",
   },
   {
     title: "No account required",
-    body: "Agency staff do not need to create or manage another login.",
+    body: "Agency staff do not need to create an account to respond.",
   },
   {
-    title: "Verify requests",
-    body: "Contact Sunlight if you need to confirm a request is legitimate.",
+    title: "Need to confirm a request is genuine?",
+    body: "Contact Sunlight and we can verify it.",
   },
 ];
 
@@ -54,35 +54,32 @@ export default function LandingPage() {
           Sunlight
         </a>
         <nav className="nav-links" aria-label="Primary navigation">
-          <a href="#about">About</a>
+          <a href="#about">How it works</a>
           <a href="#agencies">For agencies</a>
           <a href="#method">Method</a>
           <a href="#contact">Contact</a>
         </nav>
         <a className="nav-action" href="#agencies">
-          Agency path
+          For agencies
         </a>
       </header>
 
       <section className="hero" id="top">
         <div className="hero-copy">
-          <p className="status-label">Public interest archive</p>
+          <p className="status-label">Public-interest archive for official information</p>
           <h1>Sunlight</h1>
           <p className="lede">
-            We collect and preserve official information disclosure material for
-            future public-interest review, search, and reuse.
+            Sunlight collects official information responses from public agencies, preserves them with clear provenance, and prepares them for careful review, search, and reuse.
           </p>
           <p className="context">
-            Sunlight is an independent project building quiet, reliable
-            infrastructure for civic transparency. It is not a government
-            service, and received files are not automatically published.
+            Sunlight is an independent project. It is not a government service, and material sent to Sunlight is not published automatically.
           </p>
           <div className="hero-actions" aria-label="Landing page actions">
-            <a className="button button-primary" href="#agencies">
-              For agencies
+            <a className="button button-primary" href="#about">
+              Learn how it works
             </a>
-            <a className="button button-secondary" href="#method">
-              How it works
+            <a className="button button-secondary" href="#agencies">
+              For agencies
             </a>
           </div>
         </div>
@@ -94,14 +91,14 @@ export default function LandingPage() {
             width="1672"
           />
           <figcaption>
-            Preserved with source, timing, and request provenance intact.
+            Kept with clear provenance.
           </figcaption>
         </figure>
       </section>
 
       <section className="process-band" id="about" aria-labelledby="process-title">
         <div className="section-heading">
-          <p className="kicker">What Sunlight does</p>
+          <p className="kicker">How it works</p>
           <h2 id="process-title">The preservation process</h2>
         </div>
         <div className="process-grid">
@@ -117,16 +114,15 @@ export default function LandingPage() {
 
       <section className="split-section" aria-labelledby="value-title">
         <div className="section-heading">
-          <p className="kicker">Why it matters</p>
-          <h2 id="value-title">Information as infrastructure.</h2>
+          <p className="kicker">Why this matters</p>
+          <h2 id="value-title">Official information, kept accessible.</h2>
           <p>
-            OIA and LGOIMA disclosures often arrive as isolated transactions.
-            Sunlight preserves them as durable public-interest material.
+            Sunlight is building infrastructure for better access to official information. The goal is simple: make important public records easier to find, easier to search, and easier to use.
           </p>
         </div>
         <div className="value-list">
-          {publicValue.map((item) => (
-            <div className="value-item" key={item}>
+          {publicValue.map((item, index) => (
+            <div className="value-item" key={index}>
               <span aria-hidden="true" />
               <p>{item}</p>
             </div>
@@ -137,11 +133,9 @@ export default function LandingPage() {
       <section className="agency-panel" id="agencies" aria-labelledby="agency-title">
         <div>
           <p className="kicker">For agencies</p>
-          <h2 id="agency-title">A clear path for responding.</h2>
+          <h2 id="agency-title">Responding to a Sunlight request</h2>
           <p>
-            If your agency received a Sunlight request, use the unique response
-            link or reply address in that email. The public homepage does not
-            provide a tokenless upload form.
+            If your agency has received a request from Sunlight, please use the unique reply address or secure upload link included in that request.
           </p>
           <div className="agency-grid">
             {agencyItems.map((item) => (
@@ -168,15 +162,14 @@ export default function LandingPage() {
       <section className="method-trust" id="method">
         <article>
           <p className="kicker">Method</p>
-          <h2>Requests and disclosures stay distinct.</h2>
+          <h2>Requests and responses are tracked separately.</h2>
           <p>
-            Sunlight sends its own recurring requests to agencies. Agencies then
-            disclose OIA/LGOIMA request and response material back to Sunlight.
-            The collection workflow keeps those two layers separate.
+            Sunlight sends recurring requests to agencies. Agencies then send back the material covered by those requests.
+            To keep the record clear, Sunlight tracks the outgoing request, the agency response, and the preserved material as related but separate records.
           </p>
           <div className="flow" aria-label="Collection flow">
             <span>Sunlight request</span>
-            <span>Agency disclosure</span>
+            <span>Agency response</span>
             <span>Preserved material</span>
           </div>
         </article>
@@ -184,13 +177,11 @@ export default function LandingPage() {
           <p className="kicker">Trust and handling</p>
           <h2>Careful by default.</h2>
           <p>
-            Sunlight focuses on collection, provenance, and review. Raw
-            material is preserved for later processing, and sensitive or
-            mistaken submissions can be raised with Sunlight.
+            Sunlight focuses on collecting and preserving material responsibly. Files are kept with their provenance intact, reviewed before publication, and handled carefully if something sensitive or mistaken is submitted.
           </p>
           <div className="trust-markers">
             <span>Secure storage</span>
-            <span>Provenance maintained</span>
+            <span>Kept with clear provenance</span>
           </div>
         </article>
       </section>
@@ -198,11 +189,11 @@ export default function LandingPage() {
       <footer className="site-footer" id="contact">
         <strong>Sunlight</strong>
         <nav aria-label="Footer navigation">
-          <a href="mailto:sunlight@spunts.net">Contact</a>
+          <a href="mailto:sunlight@spunts.net">Contact Sunlight</a>
           <a href="#method">Privacy</a>
           <a href="#about">Project status</a>
         </nav>
-        <span>Independent public-interest infrastructure.</span>
+        <span>Sunlight is an independent public-interest project. It is not part of government. Material received by Sunlight is preserved for review and processing and is not published automatically.</span>
       </footer>
     </main>
   );
