@@ -69,6 +69,10 @@ Completed:
 * Added immediate browser-side filtering-as-you-type for the admin agencies page
   using both `onKeyUp` and `onChange` input paths.
 * Added agency pagination controls and page-size selection.
+* Replaced prohibited proxied apex DNS records that pointed at Cloudflare edge
+  IPs with the landing Worker custom-domain DNS record.
+* Deployed the Stitch-inspired landing app to `sunlight.nz` and
+  `www.sunlight.nz`.
 
 ## Verification
 
@@ -100,6 +104,7 @@ Cloudflare resources:
 * Access identity provider: One-time PIN login
 * Access-protected admin app: `admin.sunlight.nz`
 * Admin UI component system: shadcn-style local components with Tailwind v4
+* Landing app: `sunlight.nz` and `www.sunlight.nz`
 * FYI authorities imported: 3,177
 * Verified agency contacts: 0
 * Inactive imported agencies: 238
@@ -134,5 +139,5 @@ Important naming boundary:
    if the R2 API token is rotated.
 6. Add multipart upload support and per-file retry/remove controls.
 7. Investigate the Vinext dev-server 404 and confirm local previews work.
-8. Generate two landing page design directions from `docs/WEB.md`, then select
-   the implementation direction for the Vinext landing app.
+8. Replace the landing page CSS record-stack motif with a generated or supplied
+   hero image if a stronger visual asset is selected.
