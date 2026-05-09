@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import threading
 import json
 import os
 import random
@@ -8,6 +9,7 @@ import re
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -88,10 +90,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--write-sql", type=Path, help="Write generated SQL to this path.")
     parser.add_argument("--dry-run", action="store_true", help="Print a summary without applying generated SQL.")
     parser.add_argument("--brave-search", action="store_true", help="Seed official same-site URLs from Brave Search.")
+    parser.add_argument("--brave-concurrency", type=int, default=1, help="Maximum concurrent Brave Search requests.")
     parser.add_argument("--brave-results", type=int, default=8, help="Maximum Brave results per authority.")
     parser.add_argument("--min-confidence", type=int, default=50, help="Minimum confidence to keep.")
     parser.add_argument("--timeout", type=float, default=20, help="Request timeout in seconds.")
     parser.add_argument("--delay-ms", type=int, default=500, help="Maximum delay between authorities.")
+    parser.add_argument("--workers", type=int, default=12, help="Maximum concurrent authority scrapes.")
     return parser.parse_args()
 
 
@@ -215,24 +219,47 @@ def parse_metadata(value: Any) -> dict[str, Any]:
 def should_scrape_authority(authority: Authority, authority_id: str | None) -> bool:
     if authority_id and authority.id != authority_id:
         return False
-    return authority.contact_status in {"missing", "needs_review", "invalid"} and bool(authority.home_page_url)
+    return authority.contact_status in {"missing", "needs_review", "invalid"}
 
 
 def scrape_authorities(authorities: list[Authority], args: argparse.Namespace) -> dict[str, list[EmailCandidate]]:
-    session = requests.Session()
+    brave_api_key = os.environ.get("BRAVE_SEARCH_API_KEY") if args.brave_search else None
+    brave_semaphore = threading.BoundedSemaphore(max(1, args.brave_concurrency))
     results: dict[str, list[EmailCandidate]] = {}
-    for authority in authorities:
-        results[authority.id] = scrape_authority(
-            authority,
-            session=session,
-            timeout=args.timeout,
-            max_pages=args.max_pages_per_authority,
-            min_confidence=args.min_confidence,
-            brave_api_key=os.environ.get("BRAVE_SEARCH_API_KEY") if args.brave_search else None,
-            brave_results=args.brave_results,
-        )
-        sleep_between_authorities(args.delay_ms)
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
+        futures = {
+            executor.submit(scrape_authority_in_worker, authority, args, brave_api_key, brave_semaphore): authority
+            for authority in authorities
+        }
+        for future in as_completed(futures):
+            authority = futures[future]
+            try:
+                authority_id, candidates = future.result()
+            except Exception as error:
+                print(f"Scrape failed for {authority.name}: {error}", flush=True)
+                authority_id, candidates = authority.id, []
+            results[authority_id] = candidates
+            sleep_between_authorities(args.delay_ms)
     return results
+
+
+def scrape_authority_in_worker(
+    authority: Authority,
+    args: argparse.Namespace,
+    brave_api_key: str | None,
+    brave_semaphore: threading.BoundedSemaphore,
+) -> tuple[str, list[EmailCandidate]]:
+    session = requests.Session()
+    return authority.id, scrape_authority(
+        authority,
+        session=session,
+        timeout=args.timeout,
+        max_pages=args.max_pages_per_authority,
+        min_confidence=args.min_confidence,
+        brave_api_key=brave_api_key,
+        brave_results=args.brave_results,
+        brave_semaphore=brave_semaphore,
+    )
 
 
 def sleep_between_authorities(delay_ms: int) -> None:
@@ -250,11 +277,19 @@ def scrape_authority(
     min_confidence: int,
     brave_api_key: str | None = None,
     brave_results: int = 8,
+    brave_semaphore: threading.BoundedSemaphore | None = None,
 ) -> list[EmailCandidate]:
     if not authority.home_page_url:
         return []
 
-    seed_urls = brave_search_urls(authority, session=session, api_key=brave_api_key, limit=brave_results, timeout=timeout)
+    if brave_api_key and brave_semaphore:
+        brave_semaphore.acquire()
+        try:
+            seed_urls = brave_search_urls(authority, session=session, api_key=brave_api_key, limit=brave_results, timeout=timeout)
+        finally:
+            brave_semaphore.release()
+    else:
+        seed_urls = []
     pages = fetch_authority_pages(authority, session=session, timeout=timeout, max_pages=max_pages, seed_urls=seed_urls)
     candidates: dict[tuple[str, str], EmailCandidate] = {}
     for html, source_url, method in pages:

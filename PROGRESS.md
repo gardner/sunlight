@@ -129,8 +129,12 @@ Completed:
   authorities are recorded once and skipped by later normal batches.
 * Applied `0004_authority_contact_scrape_attempts.sql` locally and remotely.
 * Added scraper `--retry-attempted` for explicit re-crawls.
+* Added authority-level parallel scraping with `--workers` and a
+  `--brave-concurrency` semaphore for Brave Search API calls.
 * Re-ran sampled authorities with auto-verification enabled.
 * Ran two attempt-ledger remote batches of 100 authorities each.
+* Completed the normal first-attempt pass for active authorities using parallel
+  24-32 worker batches.
 
 ## Verification
 
@@ -146,6 +150,7 @@ pnpm dlx wrangler@latest d1 migrations apply sunlight-requests --remote --config
 uv run python scripts/scrape_authority_contacts.py --remote --limit 20 --max-pages-per-authority 8 --timeout 12 --delay-ms 200
 uv run python scripts/scrape_authority_contacts.py --remote --limit 30 --offset 20 --max-pages-per-authority 8 --timeout 12 --delay-ms 200
 uv run python scripts/scrape_authority_contacts.py --remote --limit 100 --max-pages-per-authority 6 --timeout 8 --delay-ms 50
+uv run python scripts/scrape_authority_contacts.py --remote --limit 500 --workers 32 --max-pages-per-authority 4 --timeout 5 --delay-ms 0
 BRAVE_SEARCH_API_KEY=... uv run python scripts/scrape_authority_contacts.py --brave-search --source-file /tmp/sunlight-known-authorities.json --limit 8 --max-pages-per-authority 20 --timeout 8 --write-sql /tmp/sunlight-known-contact-candidates-brave.sql --delay-ms 250
 pnpm test:ts
 pnpm exec tsc --noEmit
@@ -173,10 +178,11 @@ Cloudflare resources:
 * Admin UI component system: shadcn-style local components with Tailwind v4
 * Landing app: `sunlight.nz` and `www.sunlight.nz`
 * FYI authorities imported: 3,177
-* Verified authority contacts: 19
-* Authorities needing contact review: 0
-* Contact scrape attempts: 13 auto-verified, 179 no candidate
-* Active authorities still needing first scrape attempt: 2,741
+* Verified authority contacts: 209
+* Authorities needing contact review: 7
+* Contact scrape attempts: 203 auto-verified, 7 needs review, 2,723 no
+  candidate
+* Active authorities still needing first scrape attempt: 0
 * Contact candidate rows: 19 accepted, 1 candidate, 1 rejected
 * Inactive imported authorities: 238
 
@@ -199,13 +205,11 @@ Important naming boundary:
 ## Next Steps
 
 1. Finish the public information scraper:
-   * Continue normal batches with
-     `uv run python scripts/scrape_authority_contacts.py --remote --limit 100 --max-pages-per-authority 6 --timeout 8 --delay-ms 50`
-     until the first-attempt backlog reaches zero.
-   * Prefer running with `BRAVE_SEARCH_API_KEY` available for better official
-     same-site search seeding.
-   * After first pass, inspect `no_candidate` outcomes and decide the simple
-     fallback for form-only authorities.
+   * Run a second pass over `no_candidate` outcomes with `BRAVE_SEARCH_API_KEY`
+     available:
+     `uv run python scripts/scrape_authority_contacts.py --remote --retry-attempted --brave-search --brave-concurrency 1 --limit 500 --workers 32 --max-pages-per-authority 4 --timeout 5 --delay-ms 0`
+   * Inspect a sample of no-candidate outcomes and decide the simple fallback
+     for form-only authorities.
    * Keep manual review only for future `needs_review` rows caused by genuinely
      ambiguous candidates.
 2. Wire admin pages/actions through the existing Cloudflare Access JWT validator
