@@ -42,7 +42,7 @@ def main():
     Settings.embed_model = embed_model
     Settings.llm = None  # We only want to embed and index right now
 
-    data_dir = "/mnt/dgx-ssd/src/sunlight_nz/fyi/data"
+    data_dir = "fyi/data"
     documents = []
     
     print(f"Reading JSON files from {data_dir}...")

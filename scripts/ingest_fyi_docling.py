@@ -48,7 +48,7 @@ def main():
     print("Initializing Docling PDF Reader...")
     reader = DoclingReader()
     
-    data_dir = "/mnt/dgx-ssd/src/sunlight_nz/fyi/data/request"
+    data_dir = "fyi/data/request"
     print(f"Finding PDF files in {data_dir}...")
     
     # Grab just 3 PDFs to test the pipeline (Docling is powerful but OCR/Layout parsing takes time)

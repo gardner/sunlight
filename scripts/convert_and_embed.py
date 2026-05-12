@@ -29,8 +29,8 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import torch
 
 def main():
-    data_dir = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/data/request")
-    md_out_dir = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/markdown")
+    data_dir = Path("fyi/data/request")
+    md_out_dir = Path("fyi/markdown")
     md_out_dir.mkdir(parents=True, exist_ok=True)
     
     print("Initializing Docling DocumentConverter...")
