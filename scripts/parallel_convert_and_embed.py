@@ -7,10 +7,12 @@
 #   "llama-index-embeddings-huggingface",
 #   "lancedb",
 #   "docling",
+#   "flash-attn",
 # ]
 #
 # [tool.uv]
 # index-strategy = "unsafe-best-match"
+# no-build-isolation-package = ["flash-attn"]
 #
 # [[tool.uv.index]]
 # name = "pytorch-cu130"
@@ -19,6 +21,7 @@
 #
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu130" }
+# flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.8.3+cu130torch2.11-cp313-cp313-linux_x86_64.whl" }
 # ///
 
 from __future__ import annotations
@@ -474,7 +477,10 @@ def embedding_worker(
         device=device,
         max_length=chunk_size,
         embed_batch_size=model_embed_batch_size,
-        model_kwargs={"torch_dtype": torch.float16},
+        model_kwargs={
+            "torch_dtype": torch.float16,
+            "attn_implementation": "flash_attention_2",
+        },
     )
     parser = MarkdownNodeParser()
     writer = LanceDBChunkWriter(persist_dir)
