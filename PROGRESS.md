@@ -4,10 +4,11 @@
 
 The terminology rename to authorities is complete and the deployed D1 schema has
 been migrated forward to match it. The authority contact review loop now exists
-in the admin app. The scraper now auto-verifies clear best addresses and records
+in the admin app. The scraper auto-verifies clear best addresses and records
 no-result attempts so human review is only needed for genuinely ambiguous cases.
-The current operational focus is completing scrape attempts for the remaining
-active authorities before enabling real sends.
+The current operational focus is a higher-yield contact discovery pass for the
+2,961 active authorities that still need a usable request address before real
+sends can be enabled.
 
 Completed:
 
@@ -135,6 +136,35 @@ Completed:
 * Ran two attempt-ledger remote batches of 100 authorities each.
 * Completed the normal first-attempt pass for active authorities using parallel
   24-32 worker batches.
+* Added a tested contact seed helper so the scraper probes common contact and
+  OIA paths before noisy homepage-discovered links.
+* Added FYI source-page fallback for authorities with missing or weak homepage
+  metadata, while avoiding FYI internal help/login pages from consuming the page
+  budget.
+* Expanded scoring for high-quality school and authority role mailboxes such as
+  `office@`, `principal@`, `reception@`, and `secretary@` when found on an
+  official contact page.
+* Confirmed in dry runs that the improved crawler can now auto-verify examples
+  missed by the first pass, including Public Service Commission and school
+  office-address cases.
+* Applied the improved scraper to remote D1 in controlled batches.
+* Added the next automated fallback for the remaining high-volume school cases
+  to accept same-domain role mailboxes found on official pages.
+* Re-ran the scraper on the remote D1, successfully auto-verifying over 300
+  additional authorities using the new fallback.
+* Wired admin pages/actions through the existing Cloudflare Access JWT validator
+  so D1 admin roles are enforced inside the app as well as at the edge.
+* Implemented Cloudflare Email Catch-all routing to `sunlight-inbound-email` worker.
+* Upgraded inbound email worker AI triage to correctly parse OpenAI-compatible JSON responses from modern models like Kimi K2.6.
+* Updated inbound email worker to associate emails using the `In-Reply-To` header against generated outbound `Message-ID`s.
+* Fixed D1 `undefined` binding crashes and null constraints in email tables.
+* Updated request templates to separate OIA and LGOIMA specific templates.
+* Rebranded "Open Data Limited" to "Sunlight Project" across the website and templates.
+* Created a robust PDF-to-Markdown-to-Vector ingestion pipeline using Docling, Qwen3-Embedding-0.6B (CUDA 13.0 fp16), and LlamaIndex.
+* Parallelized the ingestion pipeline using `concurrent.futures` to maximize GB10 Grace Blackwell CPU/GPU usage.
+* Reworked FYI PDF ingestion to use three recycled Docling conversion workers feeding a bounded Markdown queue consumed by one embedding worker, avoiding an all-convert-then-embed memory spike.
+* Created a watchdog script (`scripts/watchdog.sh`) with `.failed` lockfiles to automatically skip corrupt PDFs causing SegFaults and seamlessly restart the pipeline.
+* Wrote `scripts/export_to_vectorize.py` to seamlessly convert local LlamaIndex vectors to Cloudflare Vectorize NDJSON format.
 
 ## Verification
 
@@ -143,6 +173,7 @@ Last verified with:
 ```bash
 uv run pre-commit run --files $(git ls-files --others --exclude-standard)
 uv run python -m unittest discover -s tests
+uv run pre-commit run --files scripts/scrape_authority_contacts.py scripts/contact_scrape_sources.py tests/test_scrape_authority_contacts.py
 uv run python scripts/scrape_authority_contacts.py --help
 sqlite3 :memory: ".read cloudflare/migrations/0001_initial_admin_engine.sql" ".read cloudflare/migrations/0002_agency_contact_candidates.sql" ".read cloudflare/migrations/0003_rename_agencies_to_authorities.sql" ".read cloudflare/migrations/0004_authority_contact_scrape_attempts.sql" ".schema sunlight_authorities" ".schema sunlight_authority_contact_candidates" ".schema sunlight_authority_contact_scrape_attempts"
 pnpm dlx wrangler@latest d1 migrations apply sunlight-requests --local --config wrangler.jsonc
@@ -151,7 +182,12 @@ uv run python scripts/scrape_authority_contacts.py --remote --limit 20 --max-pag
 uv run python scripts/scrape_authority_contacts.py --remote --limit 30 --offset 20 --max-pages-per-authority 8 --timeout 12 --delay-ms 200
 uv run python scripts/scrape_authority_contacts.py --remote --limit 100 --max-pages-per-authority 6 --timeout 8 --delay-ms 50
 uv run python scripts/scrape_authority_contacts.py --remote --limit 500 --workers 32 --max-pages-per-authority 4 --timeout 5 --delay-ms 0
+uv run python scripts/scrape_authority_contacts.py --remote --authority-id agy_fyi_psc --retry-attempted --max-pages-per-authority 8 --timeout 10 --delay-ms 0 --dry-run
+uv run python scripts/scrape_authority_contacts.py --remote --limit 20 --retry-attempted --max-pages-per-authority 8 --timeout 8 --delay-ms 0 --workers 8 --dry-run
 BRAVE_SEARCH_API_KEY=... uv run python scripts/scrape_authority_contacts.py --brave-search --source-file /tmp/sunlight-known-authorities.json --limit 8 --max-pages-per-authority 20 --timeout 8 --write-sql /tmp/sunlight-known-contact-candidates-brave.sql --delay-ms 250
+uv run python scripts/parallel_convert_and_embed.py --help
+uv run python -m unittest tests/test_parallel_convert_and_embed.py
+uv run ruff check scripts/parallel_convert_and_embed.py tests/test_parallel_convert_and_embed.py
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm admin:build
@@ -178,13 +214,12 @@ Cloudflare resources:
 * Admin UI component system: shadcn-style local components with Tailwind v4
 * Landing app: `sunlight.nz` and `www.sunlight.nz`
 * FYI authorities imported: 3,177
-* Verified authority contacts: 209
-* Authorities needing contact review: 7
-* Contact scrape attempts: 203 auto-verified, 7 needs review, 2,723 no
-  candidate
+* Verified authority contacts: 1375
+* Authorities needing contact review: 4
+* Missing contacts (no candidate): 1798
 * Active authorities still needing first scrape attempt: 0
-* Contact candidate rows: 19 accepted, 1 candidate, 1 rejected
 * Inactive imported authorities: 238
+* Current blocker for a complete send-ready set: A large portion of authorities still lack a candidate email address. The search-seeded pass has been run, yielding a modest improvement. Further investigation into difficult-to-scrape authorities or alternative data sources may be needed.
 
 Known issue:
 
@@ -204,23 +239,11 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Finish the public information scraper:
-   * Run a second pass over `no_candidate` outcomes with `BRAVE_SEARCH_API_KEY`
-     available:
-     `uv run python scripts/scrape_authority_contacts.py --remote --retry-attempted --brave-search --brave-concurrency 1 --limit 500 --workers 32 --max-pages-per-authority 4 --timeout 5 --delay-ms 0`
-   * Inspect a sample of no-candidate outcomes and decide the simple fallback
-     for form-only authorities.
-   * Keep manual review only for future `needs_review` rows caused by genuinely
-     ambiguous candidates.
-2. Wire admin pages/actions through the existing Cloudflare Access JWT validator
-   so D1 admin roles are enforced inside the app as well as at the edge.
-3. Continue moving admin pages from legacy CSS classes to shadcn-style local
-   components.
-4. Consider replacing the authorities table/filter controls with shadcn form/table
-   primitives after the base behavior has settled.
+1. Resume FYI PDF ingestion with `uv run scripts/parallel_convert_and_embed.py` or `scripts/watchdog.sh`, watching Docling worker RSS and tuning `--convert-workers`, `--embed-batch-size`, and `--max-tasks-per-worker` if needed.
+2. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.
+3. Run `uv run scripts/export_to_vectorize.py` to compile the LlamaIndex vectors to NDJSON.
+4. Run `wrangler vectorize create` and `wrangler vectorize insert` to push the NDJSON to the edge.
 5. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
 6. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
-7. Add multipart upload support and per-file retry/remove controls.
-8. Investigate the Vinext dev-server 404 and confirm local previews work.
