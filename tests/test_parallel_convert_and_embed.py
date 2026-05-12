@@ -56,6 +56,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
         metadata = module.build_document_metadata(pdf_path, markdown_path)
 
         self.assertEqual(metadata["source"], "fyi")
+        self.assertEqual(metadata["parser"], "docling")
         self.assertEqual(metadata["fyi_request_id"], 12117)
         self.assertEqual(metadata["fyi_response_id"], 47232)
         self.assertEqual(metadata["fyi_attachment_id"], 2)
@@ -71,6 +72,53 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             + metadata["document_id"]
             + ".md",
         )
+
+    def test_build_document_metadata_records_pymupdf_parser_when_specified(self):
+        module = load_module()
+        metadata = module.build_document_metadata(
+            Path("/tmp/source/example.pdf"),
+            Path("/tmp/out/example.md"),
+            parser="pymupdf",
+        )
+        self.assertEqual(metadata["parser"], "pymupdf")
+
+    def test_rescue_pdf_with_pymupdf_extracts_text_and_tags_parser(self):
+        import pymupdf
+
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "rescue.pdf"
+            doc = pymupdf.open()
+            page = doc.new_page()
+            page.insert_text((72, 72), "Rescue path produced this text.")
+            doc.save(str(pdf_path))
+            doc.close()
+
+            out_dir = Path(tmp_dir) / "md"
+            out_dir.mkdir()
+
+            ok, _, md_path = module.rescue_pdf_to_md_with_pymupdf(pdf_path, out_dir)
+
+            self.assertTrue(ok)
+            self.assertIsInstance(md_path, Path)
+            rendered = md_path.read_text(encoding="utf-8")
+            metadata, body = module.parse_markdown_document(rendered)
+            self.assertEqual(metadata["parser"], "pymupdf")
+            self.assertIn("Rescue path produced this text.", body)
+
+    def test_rescue_pdf_with_pymupdf_returns_false_for_empty_file(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "empty.pdf"
+            pdf_path.touch()
+            out_dir = Path(tmp_dir) / "md"
+            out_dir.mkdir()
+
+            ok, _, info = module.rescue_pdf_to_md_with_pymupdf(pdf_path, out_dir)
+
+            self.assertFalse(ok)
+            self.assertFalse((out_dir / "empty.pdf__*.md").exists())
+            self.assertIsInstance(info, str)
 
     def test_markdown_front_matter_round_trips(self):
         module = load_module()

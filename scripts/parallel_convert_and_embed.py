@@ -8,6 +8,7 @@
 #   "lancedb",
 #   "docling",
 #   "flash-attn",
+#   "pymupdf",
 # ]
 #
 # [tool.uv]
@@ -52,11 +53,7 @@ DEFAULT_EMBED_BATCH_SIZE = 200
 DEFAULT_MARKDOWN_QUEUE_SIZE = 128
 DEFAULT_MAX_TASKS_PER_WORKER = 25
 DEFAULT_CHUNK_SIZE = 1024
-# AIDEV-NOTE: Qwen3-Embedding-0.6B fp16 with batch=64/seq=1024 uses <8 GB.
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 64
-# AIDEV-NOTE: Conversion workers round-robin across the GPU list; the
-# "0,1,0" pattern biases 2:1 toward GPU 0 to offset the embedder that
-# also lives on GPU 1.
 DEFAULT_CONVERT_GPU = "0,1,0"
 DEFAULT_EMBED_GPU = "1"
 
@@ -190,7 +187,9 @@ def build_r2_keys(
     return pdf_r2_key, markdown_r2_key
 
 
-def build_document_metadata(pdf_path: Path, markdown_path: Path) -> dict[str, object]:
+def build_document_metadata(
+    pdf_path: Path, markdown_path: Path, parser: str = "docling"
+) -> dict[str, object]:
     identifiers = parse_fyi_identifiers(pdf_path)
     source = "fyi" if "fyi_request_id" in identifiers else "local"
     original_filename = unquote(pdf_path.name)
@@ -201,6 +200,7 @@ def build_document_metadata(pdf_path: Path, markdown_path: Path) -> dict[str, ob
     metadata: dict[str, object] = {
         "document_id": document_id,
         "source": source,
+        "parser": parser,
         "original_filename": original_filename,
     }
     metadata.update(identifiers)
@@ -285,6 +285,33 @@ def get_converter():
     return _cached_converter
 
 
+def rescue_pdf_to_md_with_pymupdf(
+    pdf_path: Path, out_dir: Path
+) -> tuple[bool, Path, Path | str | None]:
+    import pymupdf
+
+    md_file_path = safe_markdown_path(pdf_path, out_dir)
+    try:
+        doc = pymupdf.open(str(pdf_path))
+    except Exception as exc:
+        return False, pdf_path, f"pymupdf open failed: {exc}"
+
+    try:
+        if doc.page_count == 0:
+            return False, pdf_path, "pymupdf: 0 pages"
+        body = "\n\n".join(page.get_text() for page in doc)
+    finally:
+        doc.close()
+
+    if not body.strip():
+        return False, pdf_path, "pymupdf: empty text"
+
+    metadata = build_document_metadata(pdf_path, md_file_path, parser="pymupdf")
+    with open(md_file_path, "w", encoding="utf-8") as f:
+        f.write(render_markdown_document(metadata, body))
+    return True, pdf_path, md_file_path
+
+
 def convert_pdf_to_md(pdf_path: Path, out_dir: Path) -> tuple[bool, Path, Path | str | None]:
     md_file_path = safe_markdown_path(pdf_path, out_dir)
     failed_file = failed_marker_path(md_file_path)
@@ -308,8 +335,12 @@ def convert_pdf_to_md(pdf_path: Path, out_dir: Path) -> tuple[bool, Path, Path |
 
         failed_file.unlink(missing_ok=True)
         return True, pdf_path, md_file_path
-    except Exception as exc:
-        return False, pdf_path, str(exc)
+    except Exception as docling_exc:
+        rescued, _, info = rescue_pdf_to_md_with_pymupdf(pdf_path, out_dir)
+        if rescued:
+            failed_file.unlink(missing_ok=True)
+            return True, pdf_path, info
+        return False, pdf_path, f"docling: {docling_exc} | rescue: {info}"
 
 
 def put_markdown_for_embedding(
@@ -332,12 +363,9 @@ def put_markdown_for_embedding(
 
 
 def release_embedding_memory() -> None:
-    gc.collect()
-    try:
-        import torch
-    except ImportError:
-        return
+    import torch
 
+    gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -488,19 +516,15 @@ def embedding_worker(
     batch: list[Path] = []
     started = time.time()
 
+    def _flush() -> None:
+        flush_embedding_batch(batch, parser, embed_model, writer, Document, embedding_model_name)
+        batch.clear()
+
     while True:
         try:
             item = markdown_queue.get(timeout=5)
         except queue.Empty:
-            flush_embedding_batch(
-                batch,
-                parser,
-                embed_model,
-                writer,
-                Document,
-                embedding_model_name,
-            )
-            batch.clear()
+            _flush()
             continue
 
         if item is None:
@@ -508,17 +532,9 @@ def embedding_worker(
 
         batch.append(Path(item))
         if len(batch) >= embed_batch_size:
-            flush_embedding_batch(
-                batch,
-                parser,
-                embed_model,
-                writer,
-                Document,
-                embedding_model_name,
-            )
-            batch.clear()
+            _flush()
 
-    flush_embedding_batch(batch, parser, embed_model, writer, Document, embedding_model_name)
+    _flush()
     print(f"Embedding worker complete in {time.time() - started:.2f}s.", flush=True)
 
 
@@ -533,12 +549,8 @@ def run_conversion_pool(
 ) -> None:
     max_tasks = max_tasks_per_worker or None
     max_pending = max(convert_workers * 2, 1)
-    submitted = 0
-    completed = 0
-    successful = 0
-    failed = 0
-    queued_for_embedding = 0
-    pending = set()
+    submitted = completed = successful = failed = queued_for_embedding = 0
+    pending: set = set()
     gpu_counter = mp.Value("i", 0)
 
     with ProcessPoolExecutor(
@@ -547,54 +559,43 @@ def run_conversion_pool(
         initializer=_init_convert_worker,
         initargs=(gpu_counter, convert_gpu_list),
     ) as executor:
-        while submitted < len(pdf_files) and len(pending) < max_pending:
-            pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir))
-            submitted += 1
+        def _refill() -> None:
+            nonlocal submitted
+            while submitted < len(pdf_files) and len(pending) < max_pending:
+                pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir))
+                submitted += 1
 
+        _refill()
         while pending:
             done, pending = wait(pending, return_when=FIRST_COMPLETED)
-
             for future in done:
                 success, path, result_data = future.result()
                 completed += 1
-
                 if success:
                     successful += 1
-                    if isinstance(result_data, Path) and put_markdown_for_embedding(
-                        markdown_queue,
-                        result_data,
-                        embed_process,
-                    ):
+                    if isinstance(result_data, Path) and put_markdown_for_embedding(markdown_queue, result_data, embed_process):
                         queued_for_embedding += 1
                     print(f"[{completed}/{len(pdf_files)}] Converted: {path.name}", flush=True)
                 else:
                     failed += 1
                     print(f"[{completed}/{len(pdf_files)}] Failed: {path.name} - Error: {result_data}", flush=True)
+                _refill()
 
-                while submitted < len(pdf_files) and len(pending) < max_pending:
-                    pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir))
-                    submitted += 1
-
-    print(
-        "Conversion phase complete: "
-        f"{successful} successful, {failed} failed, {queued_for_embedding} queued for embedding.",
-        flush=True,
-    )
+    print(f"Conversion phase complete: {successful} successful, {failed} failed, {queued_for_embedding} queued for embedding.", flush=True)
 
 
 def main() -> None:
     args = build_parser().parse_args()
 
-    if args.convert_workers < 1:
-        raise SystemExit("--convert-workers must be at least 1")
-    if args.embed_batch_size < 1:
-        raise SystemExit("--embed-batch-size must be at least 1")
-    if args.markdown_queue_size < 1:
-        raise SystemExit("--markdown-queue-size must be at least 1")
-    if args.chunk_size < 1:
-        raise SystemExit("--chunk-size must be at least 1")
-    if args.model_embed_batch_size < 1:
-        raise SystemExit("--model-embed-batch-size must be at least 1")
+    for flag, value in (
+        ("--convert-workers", args.convert_workers),
+        ("--embed-batch-size", args.embed_batch_size),
+        ("--markdown-queue-size", args.markdown_queue_size),
+        ("--chunk-size", args.chunk_size),
+        ("--model-embed-batch-size", args.model_embed_batch_size),
+    ):
+        if value < 1:
+            raise SystemExit(f"{flag} must be at least 1")
     convert_gpu_list = [g.strip() for g in args.convert_gpu.split(",")]
 
     mp.set_start_method("spawn", force=True)
