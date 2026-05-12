@@ -177,7 +177,14 @@ p {
 }
 
 .archive-figure {
+  display: none;
   margin: 0;
+}
+
+@media (min-width: 768px) {
+  .archive-figure {
+    display: block;
+  }
 }
 
 .archive-figure img {

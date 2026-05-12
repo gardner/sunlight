@@ -189,9 +189,7 @@ export default function LandingPage() {
       <footer className="site-footer" id="contact">
         <strong>Sunlight</strong>
         <nav aria-label="Footer navigation">
-          <a href="mailto:sunlight@spunts.net">Contact Sunlight</a>
-          <a href="#method">Privacy</a>
-          <a href="#about">Project status</a>
+          <a href="mailto:hello@sunlight.nz">Contact Sunlight</a>
         </nav>
         <span>Sunlight is an independent public-interest project. It is not part of government. Material received by Sunlight is preserved for review and processing, and will be searchable in the future.</span>
       </footer>

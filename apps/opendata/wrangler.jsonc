@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "sunlight-opendata",
+  "compatibility_date": "2026-05-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "opendata.org.nz",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.opendata.org.nz",
+      "custom_domain": true
+    }
+  ]
+}

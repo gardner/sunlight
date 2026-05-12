@@ -1,0 +1,15 @@
+{
+  "name": "@sunlight/opendata",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "vinext start",
+    "deploy": "pnpm build && CI=true wrangler deploy dist/server/ssr/index.js --assets dist/client --config wrangler.jsonc"
+  },
+  "dependencies": {
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  }
+}
