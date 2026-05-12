@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "parallel_conver
 
 
 def load_module():
+    sys.path.insert(0, str(SCRIPT_PATH.parent))
     spec = importlib.util.spec_from_file_location("parallel_convert_and_embed", SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -108,6 +110,15 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
 
             self.assertTrue(module.put_markdown_for_embedding(fake_queue, markdown_path))
             self.assertEqual(fake_queue.items, [str(markdown_path)])
+
+    def test_embedding_memory_defaults_are_bounded(self):
+        module = load_module()
+
+        args = module.build_parser().parse_args([])
+
+        self.assertEqual(args.chunk_size, 1024)
+        self.assertEqual(args.chunk_overlap, 128)
+        self.assertEqual(args.model_embed_batch_size, 4)
 
     def test_lancedb_writer_deduplicates_chunk_ids(self):
         module = load_module()

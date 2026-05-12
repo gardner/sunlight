@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import multiprocessing as mp
@@ -35,6 +36,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote, unquote
 
+from fyi_lancedb_writer import LanceDBChunkWriter
+
 
 DEFAULT_DATA_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/data/request")
 DEFAULT_MARKDOWN_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/markdown")
@@ -44,6 +47,9 @@ DEFAULT_CONVERT_WORKERS = 3
 DEFAULT_EMBED_BATCH_SIZE = 50
 DEFAULT_MARKDOWN_QUEUE_SIZE = 32
 DEFAULT_MAX_TASKS_PER_WORKER = 25
+DEFAULT_CHUNK_SIZE = 1024
+DEFAULT_CHUNK_OVERLAP = 128
+DEFAULT_MODEL_EMBED_BATCH_SIZE = 4
 
 _cached_converter = None
 
@@ -62,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--convert-workers", type=int, default=DEFAULT_CONVERT_WORKERS)
     parser.add_argument("--embed-batch-size", type=int, default=DEFAULT_EMBED_BATCH_SIZE)
     parser.add_argument("--markdown-queue-size", type=int, default=DEFAULT_MARKDOWN_QUEUE_SIZE)
+    parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
+    parser.add_argument("--chunk-overlap", type=int, default=DEFAULT_CHUNK_OVERLAP)
+    parser.add_argument("--model-embed-batch-size", type=int, default=DEFAULT_MODEL_EMBED_BATCH_SIZE)
     parser.add_argument(
         "--max-tasks-per-worker",
         type=int,
@@ -295,6 +304,17 @@ def put_markdown_for_embedding(
             continue
 
 
+def release_embedding_memory() -> None:
+    gc.collect()
+    try:
+        import torch
+    except ImportError:
+        return
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def node_text(node) -> str:
     text = getattr(node, "text", None)
     if text is not None:
@@ -310,72 +330,6 @@ def node_text(node) -> str:
 def chunk_id_for_record(document_id: str, chunk_index: int, chunk_text: str) -> str:
     text_digest = hashlib.sha1(chunk_text.encode("utf-8")).hexdigest()[:12]
     return f"chunk_{document_id}_{chunk_index:04d}_{text_digest}"
-
-
-class LanceDBChunkWriter:
-    def __init__(self, persist_dir: Path, table_name: str = DEFAULT_TABLE_NAME):
-        self.persist_dir = persist_dir
-        self.table_name = table_name
-        self._db = None
-        self._table = None
-
-    def _connect(self):
-        if self._db is None:
-            import lancedb
-
-            self.persist_dir.mkdir(parents=True, exist_ok=True)
-            self._db = lancedb.connect(str(self.persist_dir))
-        return self._db
-
-    def _schema(self, dimension: int):
-        import pyarrow as pa
-
-        return pa.schema(
-            [
-                pa.field("chunk_id", pa.string()),
-                pa.field("vector", pa.list_(pa.float32(), dimension)),
-                pa.field("document_id", pa.string()),
-                pa.field("chunk_index", pa.int32()),
-                pa.field("chunk_text", pa.string()),
-                pa.field("text_preview", pa.string()),
-                pa.field("source", pa.string()),
-                pa.field("source_url", pa.string()),
-                pa.field("request_url", pa.string()),
-                pa.field("fyi_request_id", pa.int64()),
-                pa.field("fyi_response_id", pa.int64()),
-                pa.field("fyi_attachment_id", pa.int64()),
-                pa.field("original_filename", pa.string()),
-                pa.field("pdf_r2_key", pa.string()),
-                pa.field("markdown_r2_key", pa.string()),
-                pa.field("markdown_path", pa.string()),
-                pa.field("embedding_model", pa.string()),
-                pa.field("text_sha256", pa.string()),
-                pa.field("created_at", pa.string()),
-                pa.field("vectorize_uploaded_at", pa.string()),
-            ]
-        )
-
-    def add_records(self, records: list[dict[str, object]]) -> None:
-        if not records:
-            return
-
-        import pyarrow as pa
-
-        batch = pa.Table.from_pylist(records, schema=self._schema(len(records[0]["vector"])))
-        if self._table is None:
-            db = self._connect()
-            try:
-                self._table = db.open_table(self.table_name)
-            except Exception:
-                self._table = db.create_table(
-                    self.table_name,
-                    data=batch,
-                    schema=batch.schema,
-                    mode="create",
-                )
-                return
-
-        self._table.merge_insert("chunk_id").when_not_matched_insert_all().execute(batch)
 
 
 def build_chunk_records(nodes, markdown_paths: list[Path], embedding_model_name: str) -> list[dict[str, object]]:
@@ -466,15 +420,20 @@ def flush_embedding_batch(
     for md_path in embedded_paths:
         embedded_marker_path(md_path).touch()
 
+    release_embedding_memory()
+
 
 def embedding_worker(
     markdown_queue: mp.Queue,
     persist_dir: Path,
     embed_batch_size: int,
+    chunk_size: int,
+    chunk_overlap: int,
+    model_embed_batch_size: int,
 ) -> None:
     import torch
     from llama_index.core import Document
-    from llama_index.core.node_parser import MarkdownNodeParser
+    from llama_index.core.node_parser import SentenceSplitter
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
     embedding_model_name = "Qwen/Qwen3-Embedding-0.6B"
@@ -487,9 +446,11 @@ def embedding_worker(
     embed_model = HuggingFaceEmbedding(
         model_name=embedding_model_name,
         device=device,
+        max_length=chunk_size,
+        embed_batch_size=model_embed_batch_size,
         model_kwargs={"torch_dtype": torch.float16},
     )
-    parser = MarkdownNodeParser()
+    parser = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     writer = LanceDBChunkWriter(persist_dir)
 
     batch: list[Path] = []
@@ -594,6 +555,14 @@ def main() -> None:
         raise SystemExit("--embed-batch-size must be at least 1")
     if args.markdown_queue_size < 1:
         raise SystemExit("--markdown-queue-size must be at least 1")
+    if args.chunk_size < 1:
+        raise SystemExit("--chunk-size must be at least 1")
+    if args.chunk_overlap < 0:
+        raise SystemExit("--chunk-overlap must be at least 0")
+    if args.chunk_overlap >= args.chunk_size:
+        raise SystemExit("--chunk-overlap must be smaller than --chunk-size")
+    if args.model_embed_batch_size < 1:
+        raise SystemExit("--model-embed-batch-size must be at least 1")
 
     mp.set_start_method("spawn", force=True)
 
@@ -607,7 +576,14 @@ def main() -> None:
     markdown_queue = mp.Queue(maxsize=args.markdown_queue_size)
     embed_process = mp.Process(
         target=embedding_worker,
-        args=(markdown_queue, args.persist_dir, args.embed_batch_size),
+        args=(
+            markdown_queue,
+            args.persist_dir,
+            args.embed_batch_size,
+            args.chunk_size,
+            args.chunk_overlap,
+            args.model_embed_batch_size,
+        ),
         name="fyi-embedding-worker",
     )
     embed_process.start()

@@ -171,6 +171,8 @@ Completed:
 * Added provenance front matter to converted FYI markdown files so each document carries its FYI request URL, source PDF URL, stable document id, and planned R2 keys into downstream retrieval.
 * Replaced the old LlamaIndex export script with a streaming LanceDB-to-Vectorize NDJSON exporter using `pylance`, so the final Vectorize handoff no longer has to load the whole table into memory.
 * Smoke-tested the LanceDB pipeline against real FYI PDFs, then fixed the missing direct HuggingFace embedding dependency and a LanceDB table-list compatibility bug in the Vectorize exporter that the test exposed.
+* Started the full FYI corpus run in a PTY and confirmed LanceDB streaming flushes work, then stopped it after the embedding worker retained an 86 GiB unified-memory allocation on a long batch.
+* Bounded embedding memory by switching to fixed-size sentence chunks, setting an explicit small HuggingFace embedding batch size, and clearing CUDA cache after each persisted embedding flush.
 
 ## Verification
 
@@ -248,7 +250,7 @@ Important naming boundary:
 ## Next Steps
 
 1. Add an R2 upload command for `sunlight-corpus` that uploads only canonical PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local metadata.
-2. Run the full FYI ingestion again against the LanceDB-backed pipeline and watch Docling worker RSS plus LanceDB growth to confirm memory stays flat over a long run.
+2. Run the full FYI ingestion again against the bounded-chunk LanceDB pipeline and watch Docling worker RSS, embedding GPU memory, and LanceDB growth to confirm memory stays flat over a long run.
 3. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and run the first eval set against both pipelines.
 4. Run the streaming LanceDB-to-Vectorize export, then upload main-pipeline vectors with `source_url`, `request_url`, and `markdown_r2_key` metadata.
 5. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.

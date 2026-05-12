@@ -24,6 +24,7 @@ apps/*/dist/
 # Local logs and fixtures
 *.eml
 tail.log
+logs/
 apps/*/dev.log
 
 # Generated FYI/vector artifacts
