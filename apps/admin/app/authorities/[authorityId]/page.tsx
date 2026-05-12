@@ -7,16 +7,21 @@ import {
   acceptPrimaryContactCandidateAction,
   acceptSecondaryContactCandidateAction,
   assignTemplateAction,
+  createOneOffRequestAction,
   markAuthorityContactInvalidAction,
   rejectContactCandidateAction,
   verifyContactAction,
 } from "./actions";
+import { headers } from "next/headers";
+import { requireAdmin } from "../../../lib/access";
 
 interface AuthorityDetailPageProps {
   params: Promise<{ authorityId: string }>;
 }
 
 export default async function AuthorityDetailPage({ params }: AuthorityDetailPageProps) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const { authorityId } = await params;
   const db = (env as unknown as CloudflareEnv).DB;
   const authority = await getAuthority(db, authorityId);
@@ -41,9 +46,14 @@ export default async function AuthorityDetailPage({ params }: AuthorityDetailPag
           <p className="eyebrow">Authority</p>
           <h1>{authority.name}</h1>
         </div>
-        <a className="button" href="/authorities">
-          Authorities
-        </a>
+        <div className="flex gap-2">
+          <a className="button secondary" href={`/authorities/${authority.id}/edit`}>
+            Edit Authority
+          </a>
+          <a className="button" href="/authorities">
+            Authorities
+          </a>
+        </div>
       </header>
 
       <div className="detailGrid">
@@ -103,6 +113,12 @@ export default async function AuthorityDetailPage({ params }: AuthorityDetailPag
             <input type="hidden" name="authorityId" value={authority.id} />
             <button className="button secondary" type="submit">
               Mark contact invalid
+            </button>
+          </form>
+          <form action={createOneOffRequestAction} className="stack">
+            <input type="hidden" name="authorityId" value={authority.id} />
+            <button className="button" type="submit">
+              Create one-off request
             </button>
           </form>
         </section>

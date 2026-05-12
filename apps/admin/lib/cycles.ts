@@ -144,10 +144,11 @@ export async function getCycle(db: D1Database, cycleId: string): Promise<Request
     .first<RequestCycle>();
 }
 
-export async function listSendableAuthorities(db: D1Database): Promise<SendableAuthority[]> {
-  const result = await db
-    .prepare(
-      `
+export async function listSendableAuthorities(
+  db: D1Database,
+  authorityId?: string,
+): Promise<SendableAuthority[]> {
+  let query = `
         SELECT
           id,
           name,
@@ -158,12 +159,18 @@ export async function listSendableAuthorities(db: D1Database): Promise<SendableA
           AND contact_status = 'verified'
           AND primary_request_email IS NOT NULL
           AND default_template_id IS NOT NULL
-        ORDER BY name
-      `,
-    )
-    .all<SendableAuthority>();
-
-  return result.results;
+      `;
+  
+  if (authorityId) {
+    query += " AND id = ?";
+    query += " ORDER BY name";
+    const result = await db.prepare(query).bind(authorityId).all<SendableAuthority>();
+    return result.results;
+  } else {
+    query += " ORDER BY name";
+    const result = await db.prepare(query).all<SendableAuthority>();
+    return result.results;
+  }
 }
 
 export async function listCycleSunlightRequests(
@@ -194,13 +201,17 @@ export async function listCycleSunlightRequests(
   return result.results;
 }
 
-export async function prepareCycleRequests(db: D1Database, cycleId: string): Promise<number> {
+export async function prepareCycleRequests(
+  db: D1Database,
+  cycleId: string,
+  authorityId?: string,
+): Promise<number> {
   const cycle = await getCycle(db, cycleId);
   if (!cycle) {
     throw new Error("Unknown request cycle");
   }
 
-  const authorities = await listSendableAuthorities(db);
+  const authorities = await listSendableAuthorities(db, authorityId);
   const today = new Date().toISOString().slice(0, 10);
   let created = 0;
 

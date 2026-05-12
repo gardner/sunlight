@@ -1,6 +1,12 @@
+import { env } from "cloudflare:workers";
+import { headers } from "next/headers";
+import { requireAdmin } from "../../../lib/access";
 import { createTemplateAction } from "./actions";
 
-export default function NewTemplatePage() {
+export default async function NewTemplatePage() {
+  const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
+
   return (
     <main className="shell">
       <header className="pageHeader">

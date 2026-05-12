@@ -68,6 +68,7 @@ export function renderSunlightRequestEmail(
     cycle_month: request.cycle_month,
     legal_regime: request.legal_regime,
     reply_email: request.reply_email,
+    request_id: request.sunlight_request_id,
     response_url: request.response_url,
     sunlight_contact_details: options.contactDetails ?? DEFAULT_CONTACT_DETAILS,
   };
@@ -131,6 +132,7 @@ export async function listPreparedSunlightRequests(
           sunlight_authorities.name AS authority_name,
           sunlight_authorities.legal_regime,
           sunlight_authorities.primary_request_email,
+          sunlight_authorities.proactive_release_url,
           sunlight_request_cycles.cycle_month,
           sunlight_request_cycles.covered_from,
           sunlight_request_cycles.covered_until,

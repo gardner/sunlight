@@ -8,8 +8,28 @@ import {
   rejectContactCandidate,
 } from "../../../lib/authority-contact-candidates";
 import { assignAuthorityTemplate, verifyAuthorityContact } from "../../../lib/authorities";
+import { createCycle, prepareCycleRequests } from "../../../lib/cycles";
+import { headers } from "next/headers";
+import { requireAdmin } from "../../../lib/access";
+
+export async function createOneOffRequestAction(formData: FormData) {
+  const cloudflareEnv = env as unknown as CloudflareEnv;
+  const db = cloudflareEnv.DB;
+  await requireAdmin(await headers(), db, cloudflareEnv);
+  
+  const authorityId = String(formData.get("authorityId") ?? "");
+  const today = new Date();
+  const cycleMonth = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`;
+  
+  const cycleId = await createCycle(db, cycleMonth);
+  await prepareCycleRequests(db, cycleId, authorityId);
+  
+  redirect(`/cycles/${cycleId}`);
+}
 
 export async function verifyContactAction(formData: FormData) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const authorityId = String(formData.get("authorityId") ?? "");
   const email = String(formData.get("email") ?? "");
 
@@ -22,6 +42,8 @@ export async function verifyContactAction(formData: FormData) {
 }
 
 export async function assignTemplateAction(formData: FormData) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const authorityId = String(formData.get("authorityId") ?? "");
   const templateId = String(formData.get("templateId") ?? "");
 
@@ -34,6 +56,8 @@ export async function assignTemplateAction(formData: FormData) {
 }
 
 export async function acceptPrimaryContactCandidateAction(formData: FormData) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const authorityId = String(formData.get("authorityId") ?? "");
   const email = String(formData.get("email") ?? "");
 
@@ -47,6 +71,8 @@ export async function acceptPrimaryContactCandidateAction(formData: FormData) {
 }
 
 export async function acceptSecondaryContactCandidateAction(formData: FormData) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const authorityId = String(formData.get("authorityId") ?? "");
   const email = String(formData.get("email") ?? "");
 
@@ -60,6 +86,8 @@ export async function acceptSecondaryContactCandidateAction(formData: FormData) 
 }
 
 export async function rejectContactCandidateAction(formData: FormData) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const authorityId = String(formData.get("authorityId") ?? "");
   const email = String(formData.get("email") ?? "");
 
@@ -72,6 +100,8 @@ export async function rejectContactCandidateAction(formData: FormData) {
 }
 
 export async function markAuthorityContactInvalidAction(formData: FormData) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const authorityId = String(formData.get("authorityId") ?? "");
 
   await markAuthorityContactInvalid((env as unknown as CloudflareEnv).DB, {

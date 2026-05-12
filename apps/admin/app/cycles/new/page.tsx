@@ -1,6 +1,12 @@
+import { env } from "cloudflare:workers";
+import { headers } from "next/headers";
+import { requireAdmin } from "../../../lib/access";
 import { createCycleAction } from "./actions";
 
-export default function NewCyclePage() {
+export default async function NewCyclePage() {
+  const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
+
   return (
     <main className="shell">
       <header className="pageHeader">

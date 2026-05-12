@@ -4,12 +4,16 @@ import {
   listSunlightRequests,
   summarizeRequestTimeliness,
 } from "../../lib/sunlight-requests";
+import { headers } from "next/headers";
+import { requireAdmin } from "../../lib/access";
 
 interface RequestsPageProps {
   searchParams?: Promise<{ status?: string }>;
 }
 
 export default async function RequestsPage({ searchParams }: RequestsPageProps) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const status = (await searchParams)?.status || undefined;
   const today = new Date().toISOString().slice(0, 10);
   const requests = await listSunlightRequests((env as unknown as CloudflareEnv).DB, {
@@ -24,9 +28,6 @@ export default async function RequestsPage({ searchParams }: RequestsPageProps) 
           <p className="eyebrow">Operations</p>
           <h1>SunlightRequests</h1>
         </div>
-        <a className="button" href="/">
-          Dashboard
-        </a>
       </header>
 
       <section className="grid">
@@ -80,7 +81,11 @@ export default async function RequestsPage({ searchParams }: RequestsPageProps) 
                 className={isOverdueSunlightRequest(request, today) ? "dangerRow" : undefined}
                 key={request.id}
               >
-                <td>{request.authority_name}</td>
+                <td>
+                  <a href={`/requests/${request.id}`} className="text-primary hover:underline font-medium">
+                    {request.authority_name}
+                  </a>
+                </td>
                 <td>{request.cycle_month}</td>
                 <td>
                   <span className="pill">{request.status}</span>

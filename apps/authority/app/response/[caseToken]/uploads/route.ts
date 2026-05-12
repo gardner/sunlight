@@ -4,7 +4,7 @@ import {
   buildUploadRequest,
   createUpload,
   getSunlightRequestByToken,
-  type R2PresignConfig,
+  getR2PresignConfig,
 } from "../../../../lib/response-intake";
 
 interface UploadRouteContext {
@@ -41,23 +41,4 @@ export async function POST(request: Request, context: UploadRouteContext) {
       status: 400,
     });
   }
-}
-
-function getR2PresignConfig(env: CloudflareEnv): R2PresignConfig | null {
-  if (
-    !env.R2_ACCESS_KEY_ID ||
-    !env.R2_ACCOUNT_ID ||
-    !env.R2_BUCKET_NAME ||
-    !env.R2_SECRET_ACCESS_KEY
-  ) {
-    return null;
-  }
-
-  return {
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    accountId: env.R2_ACCOUNT_ID,
-    bucketName: env.R2_BUCKET_NAME,
-    expiresSeconds: Number(env.R2_PRESIGN_EXPIRES_SECONDS || 900),
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-  };
 }

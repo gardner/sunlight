@@ -1,7 +1,11 @@
 import { env } from "cloudflare:workers";
 import { listCycles } from "../../lib/cycles";
+import { headers } from "next/headers";
+import { requireAdmin } from "../../lib/access";
 
 export default async function CyclesPage() {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const cycles = await listCycles((env as unknown as CloudflareEnv).DB);
 
   return (

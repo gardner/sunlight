@@ -17,4 +17,10 @@ declare module "cloudflare:workers" {
 declare module "next/navigation" {
   export function notFound(): never;
   export function redirect(url: string): never;
+  export function usePathname(): string;
+}
+
+
+declare module "next/headers" {
+  export function headers(): Promise<Headers>;
 }

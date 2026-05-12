@@ -3,7 +3,9 @@ const ALLOWED_TEMPLATE_VARIABLES = new Set([
   "covered_date_range",
   "cycle_month",
   "legal_regime",
+  "proactive_release_url",
   "reply_email",
+  "request_id",
   "response_url",
   "sunlight_contact_details",
 ]);
@@ -13,7 +15,9 @@ export interface TemplateVariables {
   covered_date_range: string;
   cycle_month: string;
   legal_regime: string;
+  proactive_release_url?: string;
   reply_email: string;
+  request_id: string;
   response_url: string;
   sunlight_contact_details: string;
 }

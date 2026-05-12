@@ -9,6 +9,9 @@ export default defineConfig({
       external: ["cloudflare:workers"],
     },
   },
+  optimizeDeps: {
+    exclude: ["cloudflare:workers"],
+  },
   resolve: {
     alias: {
       "@admin": new URL(".", import.meta.url).pathname,

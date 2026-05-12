@@ -17,11 +17,11 @@ export class AdminAuthError extends Error {}
 const ACCESS_JWT_HEADER = "cf-access-jwt-assertion";
 
 export async function requireAdmin(
-  request: Request,
+  headers: Headers,
   db: D1Database,
   config: CloudflareEnv,
 ): Promise<AdminUser> {
-  const identity = await verifyAccessIdentity(request, config);
+  const identity = await verifyAccessIdentity(headers, config);
   const admin = await findAdminUser(db, identity);
 
   if (!admin || admin.status !== "active") {
@@ -32,10 +32,10 @@ export async function requireAdmin(
 }
 
 export async function verifyAccessIdentity(
-  request: Request,
+  headers: Headers,
   config: CloudflareEnv,
 ): Promise<AccessIdentity> {
-  const token = request.headers.get(ACCESS_JWT_HEADER);
+  const token = headers.get(ACCESS_JWT_HEADER);
   if (!token) {
     throw new AdminAuthError("Missing Cloudflare Access JWT");
   }

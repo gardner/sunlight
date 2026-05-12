@@ -31,6 +31,7 @@ export interface AuthorityDetail extends AuthorityListItem {
   default_cadence: string;
   default_template_id: string | null;
   notes: string | null;
+  proactive_release_url: string | null;
   source: string | null;
   source_id: string | null;
   source_metadata_json: string;
@@ -220,6 +221,7 @@ export async function getAuthority(db: D1Database, authorityId: string): Promise
           source_url,
           source_updated_at,
           source_metadata_json,
+          proactive_release_url,
           notes
         FROM sunlight_authorities
         WHERE id = ?
@@ -299,4 +301,71 @@ function normalizePositiveInteger(value: string | undefined, fallback: number): 
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export interface UpdateAuthorityInput {
+  name: string;
+  slug: string;
+  legal_regime: "OIA" | "LGOIMA" | "other";
+  status: AuthorityStatus;
+  default_cadence: string;
+  proactive_release_url: string | null;
+  notes: string | null;
+}
+
+export function buildUpdateAuthorityInput(input: Record<string, string>): UpdateAuthorityInput {
+  const name = input.name?.trim();
+  const slug = input.slug?.trim();
+  const legal_regime = input.legal_regime as "OIA" | "LGOIMA" | "other";
+  const status = input.status as AuthorityStatus;
+  const default_cadence = input.default_cadence?.trim();
+  const proactive_release_url = input.proactive_release_url?.trim() || null;
+  const notes = input.notes?.trim() || null;
+
+  if (!name || !slug || !legal_regime || !status || !default_cadence) {
+    throw new Error("Missing required authority fields");
+  }
+
+  return {
+    name,
+    slug,
+    legal_regime,
+    status,
+    default_cadence,
+    proactive_release_url,
+    notes,
+  };
+}
+
+export async function updateAuthority(
+  db: D1Database,
+  id: string,
+  input: UpdateAuthorityInput,
+): Promise<void> {
+  await db
+    .prepare(
+      `
+        UPDATE sunlight_authorities
+        SET name = ?,
+            slug = ?,
+            legal_regime = ?,
+            status = ?,
+            default_cadence = ?,
+            proactive_release_url = ?,
+            notes = ?,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ?
+      `,
+    )
+    .bind(
+      input.name,
+      input.slug,
+      input.legal_regime,
+      input.status,
+      input.default_cadence,
+      input.proactive_release_url,
+      input.notes,
+      id,
+    )
+    .run();
 }

@@ -10,19 +10,16 @@ import {
   CardTitle,
 } from "@admin/components/ui/card";
 import { getAdminSummary } from "../lib/data";
-
-const navItems = [
-  { href: "/authorities", label: "Authorities", icon: Building2 },
-  { href: "/templates", label: "Templates", icon: FileText },
-  { href: "/cycles", label: "Cycles", icon: Repeat },
-  { href: "/requests", label: "Requests", icon: Send },
-];
+import { headers } from "next/headers";
+import { requireAdmin } from "../lib/access";
 
 export default async function AdminDashboard() {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const summary = await getAdminSummary((env as unknown as CloudflareEnv).DB);
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="mx-auto max-w-6xl w-full px-6 py-10">
       <header className="mb-8 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -35,19 +32,6 @@ export default async function AdminDashboard() {
             overdue SunlightRequests from one operational surface.
           </p>
         </div>
-        <nav className="flex flex-wrap gap-2" aria-label="Admin sections">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <Button asChild key={item.href} variant="outline">
-                <a href={item.href}>
-                  <Icon aria-hidden="true" />
-                  {item.label}
-                </a>
-              </Button>
-            );
-          })}
-        </nav>
       </header>
 
       <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4" aria-label="Operational summary">

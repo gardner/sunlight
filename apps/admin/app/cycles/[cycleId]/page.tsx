@@ -17,12 +17,16 @@ import {
   retryFailedEmailsAction,
   sendCycleAction,
 } from "./actions";
+import { headers } from "next/headers";
+import { requireAdmin } from "../../../lib/access";
 
 interface CycleDetailPageProps {
   params: Promise<{ cycleId: string }>;
 }
 
 export default async function CycleDetailPage({ params }: CycleDetailPageProps) {
+    const cloudflareEnv = env as unknown as CloudflareEnv;
+  await requireAdmin(await headers(), cloudflareEnv.DB, cloudflareEnv);
   const { cycleId } = await params;
   const db = (env as unknown as CloudflareEnv).DB;
   const cycle = await getCycle(db, cycleId);

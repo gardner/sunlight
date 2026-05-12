@@ -1,0 +1,23 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "sunlight-inbound-email",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-05-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sunlight-requests",
+      "database_id": "796835ba-d5e5-4ad2-a931-bdf7b3a2b7dc"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "sunlight-request-artifacts"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  }
+}

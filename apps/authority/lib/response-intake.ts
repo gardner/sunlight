@@ -1,7 +1,7 @@
 import { AwsClient } from "aws4fetch";
 import { sha256Hex } from "./tokens";
 
-const MAX_SINGLE_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
+const MAX_SINGLE_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024 * 1024;
 const DEFAULT_UPLOAD_EXPIRES_SECONDS = 60 * 15;
 const RESPONSE_CATEGORIES = new Set([
   "acknowledgement",
@@ -15,6 +15,27 @@ const RESPONSE_CATEGORIES = new Set([
   "follow_up",
   "unknown",
 ]);
+
+export const CHUNK_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+
+export function requiresMultipartUpload(sizeBytes: number): boolean {
+  return sizeBytes > CHUNK_SIZE_BYTES;
+}
+
+export function parseInitiateMultipartUploadResponse(xml: string): string {
+  const match = xml.match(/<UploadId>(.+?)<\/UploadId>/);
+  if (!match) throw new Error("Could not parse UploadId");
+  return match[1];
+}
+
+export function buildCompleteMultipartUploadXml(parts: { partNumber: number; etag: string }[]): string {
+  let xml = "<CompleteMultipartUpload>";
+  for (const part of parts) {
+    xml += `<Part><PartNumber>${part.partNumber}</PartNumber><ETag>${part.etag}</ETag></Part>`;
+  }
+  xml += "</CompleteMultipartUpload>";
+  return xml;
+}
 
 export interface AuthoritySunlightRequest {
   authority_id: string;
@@ -58,6 +79,11 @@ export interface CreatedUpload {
   r2Key: string;
   uploadId: string;
   uploadUrl: string;
+  multipart?: {
+    uploadId: string;
+    partCount: number;
+    partUrls: string[];
+  };
 }
 
 export function buildResponseSubmission(input: {
@@ -275,7 +301,36 @@ export async function createUpload(
     upload_id: uploadId,
   });
 
-  const signed = await presignR2PutUrl(config, r2Key, upload.contentType);
+  if (requiresMultipartUpload(upload.sizeBytes)) {
+    const s3UploadId = await initiateMultipartUpload(config, r2Key, upload.contentType);
+    const partCount = Math.ceil(upload.sizeBytes / CHUNK_SIZE_BYTES);
+    const partUrls: string[] = [];
+    
+    for (let i = 1; i <= partCount; i++) {
+      partUrls.push(
+        await presignR2Url(config, r2Key, "PUT", upload.contentType, {
+          partNumber: String(i),
+          uploadId: s3UploadId,
+        })
+      );
+    }
+    
+    return {
+      expiresAt,
+      headers: upload.contentType ? { "Content-Type": upload.contentType } : {},
+      method: "PUT",
+      r2Key,
+      uploadId,
+      uploadUrl: "",
+      multipart: {
+        uploadId: s3UploadId,
+        partCount,
+        partUrls,
+      }
+    };
+  }
+
+  const signed = await presignR2Url(config, r2Key, "PUT", upload.contentType);
   return {
     expiresAt,
     headers: upload.contentType ? { "Content-Type": upload.contentType } : {},
@@ -286,16 +341,37 @@ export async function createUpload(
   };
 }
 
+export function getR2PresignConfig(env: any): R2PresignConfig | null {
+  if (
+    !env.R2_ACCESS_KEY_ID ||
+    !env.R2_ACCOUNT_ID ||
+    !env.R2_BUCKET_NAME ||
+    !env.R2_SECRET_ACCESS_KEY
+  ) {
+    return null;
+  }
+
+  return {
+    accessKeyId: env.R2_ACCESS_KEY_ID,
+    accountId: env.R2_ACCOUNT_ID,
+    bucketName: env.R2_BUCKET_NAME,
+    expiresSeconds: Number(env.R2_PRESIGN_EXPIRES_SECONDS || 900),
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+  };
+}
+
 export async function completeUpload(
   db: D1Database,
   bucket: R2Bucket,
   request: AuthoritySunlightRequest,
   uploadId: string,
+  parts?: { partNumber: number; etag: string }[],
+  config?: R2PresignConfig | null,
 ): Promise<void> {
   const upload = await db
     .prepare(
       `
-        SELECT r2_key
+        SELECT r2_key, size_bytes
         FROM sunlight_uploads
         WHERE id = ?
           AND sunlight_request_id = ?
@@ -303,10 +379,36 @@ export async function completeUpload(
       `,
     )
     .bind(uploadId, request.id)
-    .first<{ r2_key: string }>();
+    .first<{ r2_key: string, size_bytes: number }>();
 
   if (!upload) {
     throw new Error("Unknown upload");
+  }
+
+  if (parts && parts.length > 0 && config) {
+    const multipartUploadId = (config as any).multipartUploadId;
+    if (!multipartUploadId) throw new Error("Missing multipartUploadId");
+    
+    const client = new AwsClient({
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+      service: "s3",
+      region: "auto",
+    });
+
+    const url = new URL(`https://${config.accountId}.r2.cloudflarestorage.com/${config.bucketName}/${upload.r2_key}?uploadId=${multipartUploadId}`);
+    const xml = buildCompleteMultipartUploadXml(parts);
+    
+    const signed = await client.sign(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/xml" },
+      body: xml
+    });
+    
+    const res = await fetch(signed);
+    if (!res.ok) {
+      throw new Error(`Failed to complete multipart upload: ${await res.text()}`);
+    }
   }
 
   const object = await bucket.head(upload.r2_key);
@@ -428,16 +530,24 @@ async function updateSunlightResponse(
     .run();
 }
 
-async function presignR2PutUrl(
+async function presignR2Url(
   config: R2PresignConfig,
   r2Key: string,
+  method: string,
   contentType: string | null,
+  queryParams?: Record<string, string>,
 ): Promise<string> {
   const expiresSeconds = config.expiresSeconds ?? DEFAULT_UPLOAD_EXPIRES_SECONDS;
   const url = new URL(
     `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucketName}/${r2Key}`,
   );
   url.searchParams.set("X-Amz-Expires", String(expiresSeconds));
+  
+  if (queryParams) {
+    for (const [key, value] of Object.entries(queryParams)) {
+      url.searchParams.set(key, value);
+    }
+  }
 
   const client = new AwsClient({
     accessKeyId: config.accessKeyId,
@@ -447,13 +557,42 @@ async function presignR2PutUrl(
   });
   const signed = await client.sign(url, {
     headers: contentType ? { "Content-Type": contentType } : {},
-    method: "PUT",
+    method,
     aws: {
       signQuery: true,
     },
   });
 
   return signed.url;
+}
+
+async function initiateMultipartUpload(
+  config: R2PresignConfig,
+  r2Key: string,
+  contentType: string | null,
+): Promise<string> {
+  const url = new URL(
+    `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucketName}/${r2Key}?uploads`,
+  );
+
+  const client = new AwsClient({
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    service: "s3",
+    region: "auto",
+  });
+  
+  const signed = await client.sign(url, {
+    method: "POST",
+    headers: contentType ? { "Content-Type": contentType } : {},
+  });
+
+  const res = await fetch(signed);
+  if (!res.ok) {
+    throw new Error(`Failed to initiate multipart upload: ${await res.text()}`);
+  }
+  const xml = await res.text();
+  return parseInitiateMultipartUploadResponse(xml);
 }
 
 async function insertAuditEvent(

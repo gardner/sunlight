@@ -2,27 +2,46 @@
 
 import { useMemo, useState } from "react";
 import type { AuthorityListItem, AuthorityStatus, ContactStatus } from "../../lib/authorities";
+import { Input } from "@admin/components/ui/input";
+import { Label } from "@admin/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@admin/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@admin/components/ui/table";
+import { Button } from "@admin/components/ui/button";
+import { Badge } from "@admin/components/ui/badge";
 
 interface AuthorityBrowserProps {
   authorities: AuthorityListItem[];
 }
 
-const PAGE_SIZES = [25, 50, 100] as const;
+const PAGE_SIZES = ["25", "50", "100"];
 
 export function AuthorityBrowser({ authorities }: AuthorityBrowserProps) {
   const [search, setSearch] = useState("");
-  const [contactStatus, setContactStatus] = useState<ContactStatus | "">("");
-  const [status, setStatus] = useState<AuthorityStatus | "">("");
-  const [pageSize, setPageSize] = useState(50);
+  const [contactStatus, setContactStatus] = useState<string>("any");
+  const [status, setStatus] = useState<string>("any");
+  const [pageSize, setPageSize] = useState("50");
   const [page, setPage] = useState(1);
 
   const filtered = useMemo(
     () =>
       authorities.filter((authority) => {
-        if (contactStatus && authority.contact_status !== contactStatus) {
+        if (contactStatus !== "any" && authority.contact_status !== contactStatus) {
           return false;
         }
-        if (status && authority.status !== status) {
+        if (status !== "any" && authority.status !== status) {
           return false;
         }
         if (!search.trim()) {
@@ -42,10 +61,11 @@ export function AuthorityBrowser({ authorities }: AuthorityBrowserProps) {
     [authorities, contactStatus, search, status],
   );
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageSizeNum = Number(pageSize);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSizeNum));
   const currentPage = Math.min(page, pageCount);
-  const firstIndex = (currentPage - 1) * pageSize;
-  const visibleAuthorities = filtered.slice(firstIndex, firstIndex + pageSize);
+  const firstIndex = (currentPage - 1) * pageSizeNum;
+  const visibleAuthorities = filtered.slice(firstIndex, firstIndex + pageSizeNum);
   const firstVisible = filtered.length === 0 ? 0 : firstIndex + 1;
   const lastVisible = Math.min(filtered.length, firstIndex + visibleAuthorities.length);
 
@@ -56,140 +76,149 @@ export function AuthorityBrowser({ authorities }: AuthorityBrowserProps) {
   return (
     <>
       <form
-        className="filters"
+        className="mb-8 grid gap-4 md:grid-cols-5 items-end"
         onSubmit={(event) => {
           event.preventDefault();
           resetToFirstPage();
         }}
       >
-        <label>
-          Search
-          <input
+        <div className="md:col-span-2">
+          <Label htmlFor="search">Search</Label>
+          <Input
+            id="search"
             aria-label="Search authorities"
             name="search"
             onChange={(event) => {
               setSearch(event.currentTarget.value);
               resetToFirstPage();
             }}
-            onKeyUp={(event) => {
-              setSearch(event.currentTarget.value);
-              resetToFirstPage();
-            }}
-            placeholder="Type to filter authorities"
+            placeholder="Type to filter authorities..."
             value={search}
           />
-        </label>
-        <label>
-          Contact
-          <select
+        </div>
+        <div>
+          <Label>Contact</Label>
+          <Select
             name="contactStatus"
-            onChange={(event) => {
-              setContactStatus(event.currentTarget.value as ContactStatus | "");
+            onValueChange={(val) => {
+              setContactStatus(val);
               resetToFirstPage();
             }}
             value={contactStatus}
           >
-            <option value="">Any</option>
-            <option value="missing">Missing</option>
-            <option value="needs_review">Needs review</option>
-            <option value="verified">Verified</option>
-            <option value="invalid">Invalid</option>
-          </select>
-        </label>
-        <label>
-          Status
-          <select
+            <SelectTrigger>
+              <SelectValue placeholder="Any" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any</SelectItem>
+              <SelectItem value="missing">Missing</SelectItem>
+              <SelectItem value="needs_review">Needs review</SelectItem>
+              <SelectItem value="verified">Verified</SelectItem>
+              <SelectItem value="invalid">Invalid</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Status</Label>
+          <Select
             name="status"
-            onChange={(event) => {
-              setStatus(event.currentTarget.value as AuthorityStatus | "");
+            onValueChange={(val) => {
+              setStatus(val);
               resetToFirstPage();
             }}
             value={status}
           >
-            <option value="">Any</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-        </label>
-        <label>
-          Rows
-          <select
+            <SelectTrigger>
+              <SelectValue placeholder="Any" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setSearch("");
+              setContactStatus("any");
+              setStatus("any");
+              setPageSize("50");
+              setPage(1);
+            }}
+            type="button"
+            className="w-full"
+          >
+            Clear
+          </Button>
+        </div>
+      </form>
+
+      <div className="mb-4 flex items-center justify-between text-sm text-muted-foreground">
+        <p>
+          Showing <span className="font-medium text-foreground">{firstVisible.toLocaleString()}-{lastVisible.toLocaleString()}</span> of{" "}
+          <span className="font-medium text-foreground">{filtered.length.toLocaleString()}</span> authorities
+        </p>
+        <div className="flex items-center gap-2">
+           <span>Rows per page</span>
+           <Select
             name="pageSize"
-            onChange={(event) => {
-              setPageSize(Number(event.currentTarget.value));
+            onValueChange={(val) => {
+              setPageSize(val);
               resetToFirstPage();
             }}
             value={pageSize}
           >
-            {PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="filterActions">
-          <button className="button" type="submit">
-            Filter
-          </button>
-          <button
-            className="button secondary"
-            onClick={() => {
-              setSearch("");
-              setContactStatus("");
-              setStatus("");
-              setPageSize(50);
-              setPage(1);
-            }}
-            type="button"
-          >
-            Clear
-          </button>
+            <SelectTrigger className="w-20 h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZES.map((size) => (
+                <SelectItem key={size} value={size}>
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </form>
-
-      <div className="tableMeta">
-        <p>
-          Showing {firstVisible.toLocaleString()}-{lastVisible.toLocaleString()} of{" "}
-          {filtered.length.toLocaleString()} authorities
-        </p>
-        <p>
-          Page {currentPage.toLocaleString()} of {pageCount.toLocaleString()}
-        </p>
       </div>
 
-      <div className="table">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Regime</th>
-              <th>Contact</th>
-              <th>Status</th>
-              <th>Email</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Regime</TableHead>
+              <TableHead>Contact</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Email</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {visibleAuthorities.map((authority) => (
-              <tr key={authority.id}>
-                <td>
-                  <a href={`/authorities/${authority.id}`}>{authority.name}</a>
-                </td>
-                <td>{authority.legal_regime}</td>
-                <td>
-                  <span className="pill">{authority.contact_status}</span>
-                </td>
-                <td>{authority.status}</td>
-                <td>{authority.primary_request_email ?? ""}</td>
-              </tr>
+              <TableRow key={authority.id}>
+                <TableCell className="font-medium">
+                  <a href={`/authorities/${authority.id}`} className="hover:underline hover:text-primary">{authority.name}</a>
+                </TableCell>
+                <TableCell>{authority.legal_regime}</TableCell>
+                <TableCell>
+                  <Badge variant={authority.contact_status === "verified" ? "default" : "secondary"}>
+                    {authority.contact_status}
+                  </Badge>
+                </TableCell>
+                <TableCell>{authority.status}</TableCell>
+                <TableCell className="text-muted-foreground">{authority.primary_request_email ?? ""}</TableCell>
+              </TableRow>
             ))}
             {visibleAuthorities.length === 0 ? (
-              <tr>
-                <td colSpan={5}>No authorities match the current filters.</td>
-              </tr>
+              <TableRow>
+                <TableCell colSpan={5} className="h-24 text-center">No authorities match the current filters.</TableCell>
+              </TableRow>
             ) : null}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       <Pagination page={currentPage} pageCount={pageCount} setPage={setPage} />
@@ -209,42 +238,45 @@ function Pagination({
   const pages = buildPaginationPages(page, pageCount);
 
   return (
-    <nav className="pagination" aria-label="Authority pagination">
-      <button
-        className="button secondary"
+    <nav className="flex items-center justify-center gap-1 mt-6" aria-label="Authority pagination">
+      <Button
+        variant="outline"
+        size="sm"
         disabled={page <= 1}
         onClick={() => setPage(Math.max(1, page - 1))}
         type="button"
       >
         Previous
-      </button>
-      <div className="pageNumbers">
+      </Button>
+      <div className="flex gap-1 mx-2">
         {pages.map((item, index) =>
           item === "gap" ? (
-            <span aria-hidden="true" key={`${item}-${index}`}>
+            <span aria-hidden="true" key={`${item}-${index}`} className="px-2 py-1">
               ...
             </span>
           ) : (
-            <button
-              aria-current={item === page ? "page" : undefined}
-              className={item === page ? "currentPage" : ""}
+            <Button
+              variant={item === page ? "default" : "ghost"}
+              size="sm"
+              className={item === page ? "" : "text-muted-foreground"}
               key={item}
               onClick={() => setPage(item)}
               type="button"
             >
               {item}
-            </button>
+            </Button>
           ),
         )}
       </div>
-      <button
-        className="button secondary"
+      <Button
+        variant="outline"
+        size="sm"
         disabled={page >= pageCount}
         onClick={() => setPage(Math.min(pageCount, page + 1))}
         type="button"
       >
         Next
-      </button>
+      </Button>
     </nav>
   );
 }
