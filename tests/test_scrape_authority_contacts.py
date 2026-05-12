@@ -108,6 +108,67 @@ class AuthorityContactScraperTests(unittest.TestCase):
             ],
         )
 
+    def test_probes_common_contact_paths_before_noisy_oia_links(self):
+        session = FakeSession(
+            {
+                "https://example.govt.nz/": """
+                  <a href="/news/latest-oia-statistics-released">Latest OIA statistics</a>
+                """,
+                "https://example.govt.nz/contact-us": """
+                  <a href="mailto:enquiries@example.govt.nz">Contact us</a>
+                """,
+                "https://example.govt.nz/official-information-act-requests": """
+                  Email enquiries@example.govt.nz for Official Information Act requests.
+                """,
+            },
+        )
+
+        pages = fetch_authority_pages(
+            Authority(
+                id="agy_1",
+                name="Example",
+                home_page_url="https://example.govt.nz/",
+                source_url=None,
+                contact_status="missing",
+            ),
+            session=session,
+            timeout=20,
+            max_pages=3,
+        )
+
+        self.assertEqual(
+            [page[1] for page in pages],
+            [
+                "https://example.govt.nz/",
+                "https://example.govt.nz/contact-us",
+                "https://example.govt.nz/official-information-act-requests",
+            ],
+        )
+
+    def test_uses_fyi_source_when_homepage_is_missing(self):
+        session = FakeSession(
+            {
+                "https://fyi.org.nz/body/example": """
+                  Official information requests can be sent to oia@example.govt.nz.
+                """,
+            },
+        )
+
+        pages = fetch_authority_pages(
+            Authority(
+                id="agy_1",
+                name="Example",
+                home_page_url=None,
+                source_url="https://fyi.org.nz/body/example",
+                contact_status="missing",
+            ),
+            session=session,
+            timeout=20,
+            max_pages=2,
+        )
+
+        self.assertEqual(pages, [(session.pages["https://fyi.org.nz/body/example"], "https://fyi.org.nz/body/example", "fyi_page")])
+
     def test_scores_oia_candidate_with_explainable_reasons(self):
         score = score_email(
             "oia@example.govt.nz",
@@ -134,6 +195,19 @@ class AuthorityContactScraperTests(unittest.TestCase):
 
         self.assertGreaterEqual(score.confidence, 70)
         self.assertNotIn("personal-looking", score.reason)
+
+    def test_scores_school_office_address_on_contact_page(self):
+        score = score_email(
+            "office@example.school.nz",
+            source_url="https://example.school.nz/contact-us",
+            source_page_title="Contact us",
+            source_snippet="office@example.school.nz",
+            home_page_url="https://example.school.nz",
+            discovery_method="linked_page",
+        )
+
+        self.assertGreaterEqual(score.confidence, 50)
+        self.assertIn("medium local part", score.reason)
 
     def test_penalizes_external_domains_found_on_authority_pages(self):
         score = score_email(
@@ -231,9 +305,9 @@ class AuthorityContactScraperTests(unittest.TestCase):
 
 
 class FakeResponse:
-    def __init__(self, text):
+    def __init__(self, text, status_code=200):
         self.text = text
-        self.status_code = 200
+        self.status_code = status_code
         self.headers = {"content-type": "text/html"}
 
 
@@ -242,6 +316,8 @@ class FakeSession:
         self.pages = pages
 
     def get(self, url, **_kwargs):
+        if url not in self.pages:
+            return FakeResponse("", status_code=404)
         return FakeResponse(self.pages[url])
 
 

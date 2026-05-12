@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import argparse
 import threading
 import json
@@ -17,12 +16,12 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from curl_cffi import requests
-
 try:
-    from scripts.contact_scrape_sql import build_scrape_sql, candidate_id, sql
+    from scripts.contact_scrape_sql import build_scrape_sql, candidate_id, sql  # noqa: F401
+    from scripts.contact_scrape_sources import contact_seed_urls
 except ModuleNotFoundError:
-    from contact_scrape_sql import build_scrape_sql, candidate_id, sql
-
+    from contact_scrape_sql import build_scrape_sql, candidate_id, sql  # noqa: F401
+    from contact_scrape_sources import contact_seed_urls
 USER_AGENT = "SunlightRequestsContactScraper/0.1 (+https://sunlight.nz)"
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 LOCAL_PART_RE = re.compile(r"[A-Z0-9._%+-]+", re.I)
@@ -46,7 +45,7 @@ STRONG_LOCAL_PARTS = {
     "information", "information.requests", "informationrequests", "lgoinfo", "lgoima",
     "official.information", "officialinformation", "oia", "requests",
 }
-MEDIUM_LOCAL_PARTS = {"admin", "contact", "enquiries", "info", "records"}
+MEDIUM_LOCAL_PARTS = {"admin", "contact", "enquiries", "info", "office", "principal", "reception", "records", "secretary"}
 WRONG_LOCAL_TERMS = {"careers", "hr", "jobs", "media", "news", "procurement", "recruitment", "tenders", "webmaster"}
 NO_REPLY_LOCAL_PARTS = {"bounce", "donotreply", "do-not-reply", "no-reply", "noreply"}
 @dataclass(frozen=True)
@@ -56,6 +55,7 @@ class Authority:
     home_page_url: str | None
     source_url: str | None
     contact_status: str
+    disclosure_log_url: str | None = None
 @dataclass(frozen=True)
 class PageLink:
     url: str
@@ -201,6 +201,7 @@ def authority_from_row(row: dict[str, Any]) -> Authority:
         home_page_url=clean_url(metadata.get("home_page")),
         source_url=clean_url(row.get("source_url")),
         contact_status=str(row.get("contact_status") or "missing"),
+        disclosure_log_url=clean_url(metadata.get("disclosure_log")),
     )
 
 
@@ -279,7 +280,7 @@ def scrape_authority(
     brave_results: int = 8,
     brave_semaphore: threading.BoundedSemaphore | None = None,
 ) -> list[EmailCandidate]:
-    if not authority.home_page_url:
+    if not authority.home_page_url and not authority.source_url and not authority.disclosure_log_url:
         return []
 
     if brave_api_key and brave_semaphore:
@@ -316,12 +317,13 @@ def fetch_authority_pages(
     max_pages: int,
     seed_urls: list[str] | None = None,
 ) -> list[tuple[str, str, str]]:
-    homepage = fetch_html(session, authority.home_page_url, timeout=timeout)
+    homepage = fetch_html(session, authority.home_page_url, timeout=timeout) if authority.home_page_url else None
     pages = [(homepage, authority.home_page_url, "homepage")] if homepage else []
     visited = {authority.home_page_url} if homepage else set()
     seeds = [PageLink(url=url, text="Brave Search result") for url in seed_urls or []]
+    contact_seeds = [PageLink(url=url, text=text) for url, text in contact_seed_urls(authority.home_page_url, authority.source_url, authority.disclosure_log_url)]
     fallback_links = find_candidate_links(homepage, authority.home_page_url, max_links=max_pages * 20) if homepage else []
-    pending = sorted(seeds or fallback_links, key=link_priority)
+    pending = sorted(unique_links([*seeds, *contact_seeds, *fallback_links]).values(), key=link_priority)
     while pending and len(pages) < max_pages:
         link = pending.pop(0)
         if link.url in visited:
@@ -330,11 +332,13 @@ def fetch_authority_pages(
         print(f"{authority.name}: fetching {len(pages) + 1}/{max_pages} {link.url}", flush=True)
         html = fetch_html(session, link.url, timeout=timeout)
         if html:
-            pages.append((html, link.url, "linked_page"))
-            for new_link in find_candidate_links(html, link.url, max_links=max_pages * 20):
-                if new_link.url not in visited:
-                    pending.append(new_link)
-            pending = sorted(unique_links(pending).values(), key=link_priority)[: max_pages * 20]
+            method = "fyi_page" if link.url == authority.source_url else "linked_page"
+            pages.append((html, link.url, method))
+            if method != "fyi_page":
+                for new_link in find_candidate_links(html, link.url, max_links=max_pages * 20):
+                    if new_link.url not in visited:
+                        pending.append(new_link)
+                pending = sorted(unique_links(pending).values(), key=link_priority)[: max_pages * 20]
     return pages
 
 
@@ -460,8 +464,7 @@ def is_usable_email(local_part: str, domain: str) -> bool:
     if labels[0] == "example" and len(labels) == 2:
         return False
     compact_local = re.sub(r"[^a-z0-9]", "", local_part)
-    blocked = {re.sub(r"[^a-z0-9]", "", item) for item in NO_REPLY_LOCAL_PARTS} | {"privacy"}
-    return compact_local not in blocked
+    return compact_local not in ({re.sub(r"[^a-z0-9]", "", item) for item in NO_REPLY_LOCAL_PARTS} | {"privacy"})
 
 
 def find_candidate_links(html: str, base_url: str, *, max_links: int = 500) -> list[PageLink]:
@@ -502,6 +505,8 @@ def unique_links(links: list[PageLink]) -> dict[str, PageLink]:
 
 def link_priority(link: PageLink) -> tuple[int, int, str]:
     lowered = f"{link.url} {link.text}".lower()
+    if "contact probe" in lowered and "contact" in link.url.lower():
+        return (-1, len(link.url), link.url)
     if any(term in lowered for term in ("official-information", "information-request", "lgoima", "oia")):
         return (0, len(link.url), link.url)
     if "contact" in lowered or "privacy" in lowered:
@@ -526,9 +531,18 @@ def score_email(
     score, reasons = score_local_part(local_part, score, reasons)
     score, reasons = score_context(source_url, source_page_title, source_snippet, score, reasons)
     score, reasons = score_source(email, home_page_url, discovery_method, score, reasons)
+
+    lowered_url = source_url.lower()
+    is_target_page = discovery_method == "homepage" or "contact" in lowered_url or "privacy" in lowered_url
+    is_target_role = re.sub(r"[^a-z0-9]", "", local_part.lower()) in {"office", "admin", "principal", "reception", "secretary"}
+    if is_target_page and is_target_role:
+        if home_page_url and domains_match(email.rsplit("@", 1)[1], urlparse(home_page_url).hostname or ""):
+            if score < 80:
+                score += 45
+                reasons.append("high-volume role fallback on official page")
+
     score = max(0, min(100, score))
     return Score(confidence=score, reason="; ".join(reasons) or "no positive signals")
-
 
 def score_local_part(local_part: str, score: int, reasons: list[str]) -> tuple[int, list[str]]:
     compact_local = re.sub(r"[^a-z0-9]", "", local_part)
@@ -562,6 +576,9 @@ def score_context(
     if any(term in lowered_url for term in ("official-information", "information-request", "oia", "lgoima")):
         score += 20
         reasons.append("source URL has request terms")
+    if "contact" in lowered_url:
+        score += 15
+        reasons.append("source URL has contact terms")
     if any(term in context for term in CONTEXT_TERMS):
         score += 15
         reasons.append("page text has request terms")
@@ -582,7 +599,7 @@ def score_source(
         elif re.sub(r"[^a-z0-9]", "", email.split("@", 1)[0]) not in {part.replace(".", "") for part in STRONG_LOCAL_PARTS}:
             score -= 30
             reasons.append("email domain differs from authority site")
-    if discovery_method in {"homepage", "linked_page"}:
+    if discovery_method in {"homepage", "linked_page", "fyi_page"}:
         score += 5
         reasons.append("official authority source")
     return score, reasons
@@ -604,7 +621,7 @@ def apply_sql(database: str, generated_sql: str, *, remote: bool) -> None:
         file.write(generated_sql)
         sql_path = Path(file.name)
 
-    command = ["pnpm", "dlx", "wrangler@latest", "d1", "execute", database, "--file", str(sql_path)]
+    command = ["pnpm", "dlx", "wrangler@latest", "d1", "execute", database, "--file", str(sql_path), "-y"]
     if remote:
         command.append("--remote")
 
@@ -618,22 +635,15 @@ def clean_url(value: Any) -> str | None:
     if not value:
         return None
     parsed = urlparse(str(value).strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
-    return parsed._replace(fragment="").geturl()
+    return parsed._replace(fragment="").geturl() if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
 def page_title(soup: BeautifulSoup) -> str | None:
-    if soup.title and soup.title.string:
-        return " ".join(soup.title.string.split())[:160]
-    return None
+    return " ".join(soup.title.string.split())[:160] if soup.title and soup.title.string else None
 
 
 def short_snippet(value: str | None, *, limit: int = 240) -> str | None:
-    if not value:
-        return None
-    collapsed = " ".join(value.split())
-    return collapsed[:limit]
+    return " ".join(value.split())[:limit] if value else None
 
 
 if __name__ == "__main__":
