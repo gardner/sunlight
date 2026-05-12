@@ -165,6 +165,7 @@ Completed:
 * Reworked FYI PDF ingestion to use three recycled Docling conversion workers feeding a bounded Markdown queue consumed by one embedding worker, avoiding an all-convert-then-embed memory spike.
 * Created a watchdog script (`scripts/watchdog.sh`) with `.failed` lockfiles to automatically skip corrupt PDFs causing SegFaults and seamlessly restart the pipeline.
 * Wrote `scripts/export_to_vectorize.py` to seamlessly convert local LlamaIndex vectors to Cloudflare Vectorize NDJSON format.
+* Documented the revised vector storage plan in `docs/VECTORS.md`, recommending a streaming SQLite vector spool for local ingestion, Vectorize for deployed search, R2 for full markdown/PDF artifacts, and D1 for structured metadata.
 
 ## Verification
 
@@ -239,11 +240,12 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Resume FYI PDF ingestion with `uv run scripts/parallel_convert_and_embed.py` or `scripts/watchdog.sh`, watching Docling worker RSS and tuning `--convert-workers`, `--embed-batch-size`, and `--max-tasks-per-worker` if needed.
-2. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.
-3. Run `uv run scripts/export_to_vectorize.py` to compile the LlamaIndex vectors to NDJSON.
-4. Run `wrangler vectorize create` and `wrangler vectorize insert` to push the NDJSON to the edge.
-5. Do a controlled live Cloudflare Email Sending test before sending to real
+1. Replace the FYI ingestion LlamaIndex JSON persistence with the SQLite vector spool described in `docs/VECTORS.md`.
+2. Update `scripts/export_to_vectorize.py` to stream SQLite vector BLOBs into <= 5000-vector NDJSON upload files.
+3. Resume FYI PDF ingestion with `uv run scripts/parallel_convert_and_embed.py` or `scripts/watchdog.sh`, watching Docling worker RSS and SQLite write throughput.
+4. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.
+5. Run `wrangler vectorize create` and `wrangler vectorize insert` to push the NDJSON to the edge.
+6. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-6. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+7. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
