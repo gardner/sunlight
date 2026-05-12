@@ -5,6 +5,7 @@
 #   "sentence-transformers",
 #   "llama-index-core",
 #   "llama-index-embeddings-huggingface",
+#   "lancedb",
 #   "docling",
 # ]
 #
@@ -23,16 +24,22 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import multiprocessing as mp
 import queue
+import re
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 
 DEFAULT_DATA_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/data/request")
 DEFAULT_MARKDOWN_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/markdown")
-DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel_index")
+DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel.lancedb")
+DEFAULT_TABLE_NAME = "chunks"
 DEFAULT_CONVERT_WORKERS = 3
 DEFAULT_EMBED_BATCH_SIZE = 50
 DEFAULT_MARKDOWN_QUEUE_SIZE = 32
@@ -45,7 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Convert FYI PDFs to Markdown with Docling workers while one "
-            "embedding worker consumes completed Markdown in bounded batches."
+            "embedding worker consumes completed Markdown in bounded batches "
+            "and streams chunk vectors into LanceDB."
         )
     )
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
@@ -63,13 +71,169 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def stable_path_digest(path: Path, length: int = 12) -> str:
+    return hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:length]
+
+
+def sanitize_markdown_filename(filename: str) -> str:
+    return unquote(filename).replace(" ", "_").replace("%20", "_")
+
+
+def sanitize_r2_filename(filename: str) -> str:
+    normalized = unquote(filename).strip().lower()
+    safe_name = re.sub(r"[^a-z0-9.]+", "-", normalized).strip("-")
+    return safe_name or "document"
+
+
 def safe_markdown_path(pdf_path: Path, out_dir: Path) -> Path:
-    safe_name = pdf_path.name.replace(" ", "_").replace("%20", "_")
-    return out_dir / f"{safe_name}.md"
+    safe_name = sanitize_markdown_filename(pdf_path.name)
+    digest = stable_path_digest(pdf_path)
+    return out_dir / f"{safe_name}__{digest}.md"
 
 
 def embedded_marker_path(markdown_path: Path) -> Path:
     return Path(str(markdown_path) + ".embedded")
+
+
+def failed_marker_path(markdown_path: Path) -> Path:
+    return Path(str(markdown_path) + ".failed")
+
+
+def utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def parse_fyi_identifiers(path: Path) -> dict[str, int]:
+    values: dict[str, int] = {}
+    parts = list(path.parts)
+
+    for key in ("request", "response", "attach"):
+        if key not in parts:
+            continue
+        key_index = parts.index(key)
+        if key_index + 1 >= len(parts):
+            continue
+        raw_value = parts[key_index + 1]
+        if raw_value.isdigit():
+            metadata_key = "fyi_attachment_id" if key == "attach" else f"fyi_{key}_id"
+            values[metadata_key] = int(raw_value)
+
+    return values
+
+
+def build_document_id(source: str, path_digest: str, identifiers: dict[str, int]) -> str:
+    if source == "fyi" and identifiers.get("fyi_request_id"):
+        request_id = identifiers["fyi_request_id"]
+        response_id = identifiers.get("fyi_response_id", 0)
+        attachment_id = identifiers.get("fyi_attachment_id", 0)
+        return f"doc_fyi_{request_id}_{response_id}_{attachment_id}_{path_digest}"
+    return f"doc_local_{path_digest}"
+
+
+def build_r2_keys(
+    document_id: str,
+    original_filename: str,
+    identifiers: dict[str, int],
+) -> tuple[str | None, str | None]:
+    request_id = identifiers.get("fyi_request_id")
+    response_id = identifiers.get("fyi_response_id")
+    attachment_id = identifiers.get("fyi_attachment_id")
+    if request_id is None or response_id is None or attachment_id is None:
+        return None, None
+
+    digest = document_id.rsplit("_", 1)[-1]
+    pdf_r2_key = (
+        "canonical/fyi/v1/pdf/"
+        f"request/{request_id}/response/{response_id}/attach/{attachment_id}/"
+        f"{digest}-{sanitize_r2_filename(original_filename)}"
+    )
+    markdown_r2_key = (
+        "markdown/fyi/v1/"
+        f"request/{request_id}/response/{response_id}/attach/{attachment_id}/{document_id}.md"
+    )
+    return pdf_r2_key, markdown_r2_key
+
+
+def build_document_metadata(pdf_path: Path, markdown_path: Path) -> dict[str, object]:
+    identifiers = parse_fyi_identifiers(pdf_path)
+    source = "fyi" if "fyi_request_id" in identifiers else "local"
+    original_filename = unquote(pdf_path.name)
+    path_digest = stable_path_digest(pdf_path)
+    document_id = build_document_id(source, path_digest, identifiers)
+    pdf_r2_key, markdown_r2_key = build_r2_keys(document_id, original_filename, identifiers)
+
+    metadata: dict[str, object] = {
+        "document_id": document_id,
+        "source": source,
+        "original_filename": original_filename,
+    }
+    metadata.update(identifiers)
+
+    request_id = identifiers.get("fyi_request_id")
+    response_id = identifiers.get("fyi_response_id")
+    attachment_id = identifiers.get("fyi_attachment_id")
+
+    if request_id is not None:
+        metadata["request_url"] = f"https://fyi.org.nz/request/{request_id}"
+
+    if request_id is not None and response_id is not None and attachment_id is not None:
+        encoded_name = quote(unquote(pdf_path.name), safe="")
+        metadata["source_url"] = (
+            f"https://fyi.org.nz/request/{request_id}/response/{response_id}/"
+            f"attach/{attachment_id}/{encoded_name}"
+        )
+
+    if pdf_r2_key is not None:
+        metadata["pdf_r2_key"] = pdf_r2_key
+    if markdown_r2_key is not None:
+        metadata["markdown_r2_key"] = markdown_r2_key
+
+    return metadata
+
+
+def render_markdown_document(metadata: dict[str, object], body: str) -> str:
+    lines = ["---"]
+    for key in sorted(metadata):
+        value = metadata[key]
+        if value is None:
+            continue
+        lines.append(f"{key}: {json.dumps(value, ensure_ascii=True)}")
+    lines.extend(["---", "", body])
+    return "\n".join(lines)
+
+
+def parse_markdown_document(text: str) -> tuple[dict[str, object], str]:
+    if not text.startswith("---\n"):
+        return {}, text
+
+    end_index = text.find("\n---\n", 4)
+    if end_index == -1:
+        return {}, text
+
+    raw_metadata = text[4:end_index]
+    body = text[end_index + len("\n---\n") :]
+    if body.startswith("\n"):
+        body = body[1:]
+    metadata: dict[str, object] = {}
+
+    for line in raw_metadata.splitlines():
+        if not line.strip():
+            continue
+        key, separator, raw_value = line.partition(":")
+        if not separator:
+            return {}, text
+        metadata[key.strip()] = json.loads(raw_value.strip())
+
+    return metadata, body
+
+
+def fallback_markdown_metadata(markdown_path: Path) -> dict[str, object]:
+    digest = stable_path_digest(markdown_path)
+    return {
+        "document_id": f"doc_markdown_{digest}",
+        "source": "local",
+        "original_filename": markdown_path.name,
+    }
 
 
 def get_converter():
@@ -87,25 +251,26 @@ def get_converter():
 
 def convert_pdf_to_md(pdf_path: Path, out_dir: Path) -> tuple[bool, Path, Path | str | None]:
     md_file_path = safe_markdown_path(pdf_path, out_dir)
-    failed_file_path = out_dir / f"{md_file_path.stem}.failed"
+    failed_file = failed_marker_path(md_file_path)
 
     if md_file_path.exists():
         return True, pdf_path, md_file_path
 
-    if failed_file_path.exists():
+    if failed_file.exists():
         return False, pdf_path, "Skipped due to previous critical failure (.failed lock exists)"
 
-    failed_file_path.touch()
+    failed_file.touch()
 
     try:
         converter = get_converter()
         result = converter.convert(str(pdf_path))
-        md_text = result.document.export_to_markdown()
+        body = result.document.export_to_markdown()
+        metadata = build_document_metadata(pdf_path, md_file_path)
 
         with open(md_file_path, "w", encoding="utf-8") as f:
-            f.write(md_text)
+            f.write(render_markdown_document(metadata, body))
 
-        failed_file_path.unlink(missing_ok=True)
+        failed_file.unlink(missing_ok=True)
         return True, pdf_path, md_file_path
     except Exception as exc:
         return False, pdf_path, str(exc)
@@ -130,18 +295,140 @@ def put_markdown_for_embedding(
             continue
 
 
+def node_text(node) -> str:
+    text = getattr(node, "text", None)
+    if text is not None:
+        return text
+
+    get_content = getattr(node, "get_content", None)
+    if callable(get_content):
+        return get_content()
+
+    raise ValueError("Node does not expose text content")
+
+
+def chunk_id_for_record(document_id: str, chunk_index: int, chunk_text: str) -> str:
+    text_digest = hashlib.sha1(chunk_text.encode("utf-8")).hexdigest()[:12]
+    return f"chunk_{document_id}_{chunk_index:04d}_{text_digest}"
+
+
+class LanceDBChunkWriter:
+    def __init__(self, persist_dir: Path, table_name: str = DEFAULT_TABLE_NAME):
+        self.persist_dir = persist_dir
+        self.table_name = table_name
+        self._db = None
+        self._table = None
+
+    def _connect(self):
+        if self._db is None:
+            import lancedb
+
+            self.persist_dir.mkdir(parents=True, exist_ok=True)
+            self._db = lancedb.connect(str(self.persist_dir))
+        return self._db
+
+    def _schema(self, dimension: int):
+        import pyarrow as pa
+
+        return pa.schema(
+            [
+                pa.field("chunk_id", pa.string()),
+                pa.field("vector", pa.list_(pa.float32(), dimension)),
+                pa.field("document_id", pa.string()),
+                pa.field("chunk_index", pa.int32()),
+                pa.field("chunk_text", pa.string()),
+                pa.field("text_preview", pa.string()),
+                pa.field("source", pa.string()),
+                pa.field("source_url", pa.string()),
+                pa.field("request_url", pa.string()),
+                pa.field("fyi_request_id", pa.int64()),
+                pa.field("fyi_response_id", pa.int64()),
+                pa.field("fyi_attachment_id", pa.int64()),
+                pa.field("original_filename", pa.string()),
+                pa.field("pdf_r2_key", pa.string()),
+                pa.field("markdown_r2_key", pa.string()),
+                pa.field("markdown_path", pa.string()),
+                pa.field("embedding_model", pa.string()),
+                pa.field("text_sha256", pa.string()),
+                pa.field("created_at", pa.string()),
+                pa.field("vectorize_uploaded_at", pa.string()),
+            ]
+        )
+
+    def add_records(self, records: list[dict[str, object]]) -> None:
+        if not records:
+            return
+
+        import pyarrow as pa
+
+        batch = pa.Table.from_pylist(records, schema=self._schema(len(records[0]["vector"])))
+        if self._table is None:
+            db = self._connect()
+            try:
+                self._table = db.open_table(self.table_name)
+            except Exception:
+                self._table = db.create_table(
+                    self.table_name,
+                    data=batch,
+                    schema=batch.schema,
+                    mode="create",
+                )
+                return
+
+        self._table.merge_insert("chunk_id").when_not_matched_insert_all().execute(batch)
+
+
+def build_chunk_records(nodes, markdown_paths: list[Path], embedding_model_name: str) -> list[dict[str, object]]:
+    chunk_counts: dict[str, int] = {}
+    records: list[dict[str, object]] = []
+    created_at = utc_now_iso()
+
+    for node in nodes:
+        metadata = dict(getattr(node, "metadata", {}) or {})
+        chunk_text = node_text(node)
+        document_id = str(metadata.get("document_id") or f"doc_markdown_{stable_path_digest(Path(markdown_paths[0]))}")
+        chunk_index = chunk_counts.get(document_id, 0)
+        chunk_counts[document_id] = chunk_index + 1
+
+        records.append(
+            {
+                "chunk_id": chunk_id_for_record(document_id, chunk_index, chunk_text),
+                "document_id": document_id,
+                "chunk_index": chunk_index,
+                "chunk_text": chunk_text,
+                "text_preview": chunk_text[:500],
+                "source": metadata.get("source"),
+                "source_url": metadata.get("source_url"),
+                "request_url": metadata.get("request_url"),
+                "fyi_request_id": metadata.get("fyi_request_id"),
+                "fyi_response_id": metadata.get("fyi_response_id"),
+                "fyi_attachment_id": metadata.get("fyi_attachment_id"),
+                "original_filename": metadata.get("original_filename"),
+                "pdf_r2_key": metadata.get("pdf_r2_key"),
+                "markdown_r2_key": metadata.get("markdown_r2_key"),
+                "markdown_path": metadata.get("markdown_path"),
+                "embedding_model": embedding_model_name,
+                "text_sha256": hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+                "created_at": created_at,
+                "vectorize_uploaded_at": None,
+            }
+        )
+
+    return records
+
+
 def flush_embedding_batch(
     batch: list[Path],
     parser,
-    index,
-    persist_dir: Path,
+    embed_model,
+    writer: LanceDBChunkWriter,
     document_class,
-    vector_index_class,
-):
+    embedding_model_name: str,
+) -> None:
     if not batch:
-        return index
+        return
 
-    llama_docs = []
+    documents = []
     embedded_paths = []
 
     for md_path in batch:
@@ -150,35 +437,34 @@ def flush_embedding_batch(
 
         try:
             with open(md_path, "r", encoding="utf-8") as f:
-                text = f.read()
-            llama_docs.append(
-                document_class(
-                    text=text,
-                    metadata={"source_file": str(md_path), "file_name": md_path.name},
-                )
-            )
+                raw_text = f.read()
+            metadata, body = parse_markdown_document(raw_text)
+            if not metadata:
+                metadata = fallback_markdown_metadata(md_path)
+            metadata["markdown_path"] = str(md_path)
+            documents.append(document_class(text=body, metadata=metadata))
             embedded_paths.append(md_path)
         except Exception as exc:
             print(f"Error reading {md_path}: {exc}", flush=True)
 
-    if not llama_docs:
-        return index
+    if not documents:
+        return
 
-    nodes = parser.get_nodes_from_documents(llama_docs)
+    nodes = parser.get_nodes_from_documents(documents)
     print(f"Embedding {len(nodes)} nodes from {len(embedded_paths)} markdown files...", flush=True)
 
-    if index is None:
-        index = vector_index_class(nodes, show_progress=True)
-    else:
-        index.insert_nodes(nodes)
+    texts = [node_text(node) for node in nodes]
+    embeddings = embed_model.get_text_embedding_batch(texts, show_progress=True)
+    records = build_chunk_records(nodes, embedded_paths, embedding_model_name)
 
-    print(f"Persisting embedded batch to {persist_dir}...", flush=True)
-    index.storage_context.persist(persist_dir=persist_dir)
+    for record, embedding in zip(records, embeddings, strict=True):
+        record["vector"] = embedding
+
+    print(f"Persisting embedded batch to {writer.persist_dir}...", flush=True)
+    writer.add_records(records)
 
     for md_path in embedded_paths:
         embedded_marker_path(md_path).touch()
-
-    return index
 
 
 def embedding_worker(
@@ -187,30 +473,24 @@ def embedding_worker(
     embed_batch_size: int,
 ) -> None:
     import torch
-    from llama_index.core import Document, Settings, StorageContext, VectorStoreIndex, load_index_from_storage
+    from llama_index.core import Document
     from llama_index.core.node_parser import MarkdownNodeParser
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
+    embedding_model_name = "Qwen/Qwen3-Embedding-0.6B"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Embedding worker loading Qwen model on {device}...", flush=True)
 
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
 
-    Settings.embed_model = HuggingFaceEmbedding(
-        model_name="Qwen/Qwen3-Embedding-0.6B",
+    embed_model = HuggingFaceEmbedding(
+        model_name=embedding_model_name,
         device=device,
         model_kwargs={"torch_dtype": torch.float16},
     )
-    Settings.llm = None
-
     parser = MarkdownNodeParser()
-    if persist_dir.exists() and any(persist_dir.iterdir()):
-        print(f"Embedding worker loading existing index from {persist_dir}...", flush=True)
-        storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
-        index = load_index_from_storage(storage_context)
-    else:
-        index = None
+    writer = LanceDBChunkWriter(persist_dir)
 
     batch: list[Path] = []
     started = time.time()
@@ -219,13 +499,13 @@ def embedding_worker(
         try:
             item = markdown_queue.get(timeout=5)
         except queue.Empty:
-            index = flush_embedding_batch(
+            flush_embedding_batch(
                 batch,
                 parser,
-                index,
-                persist_dir,
+                embed_model,
+                writer,
                 Document,
-                VectorStoreIndex,
+                embedding_model_name,
             )
             batch.clear()
             continue
@@ -235,17 +515,17 @@ def embedding_worker(
 
         batch.append(Path(item))
         if len(batch) >= embed_batch_size:
-            index = flush_embedding_batch(
+            flush_embedding_batch(
                 batch,
                 parser,
-                index,
-                persist_dir,
+                embed_model,
+                writer,
                 Document,
-                VectorStoreIndex,
+                embedding_model_name,
             )
             batch.clear()
 
-    flush_embedding_batch(batch, parser, index, persist_dir, Document, VectorStoreIndex)
+    flush_embedding_batch(batch, parser, embed_model, writer, Document, embedding_model_name)
     print(f"Embedding worker complete in {time.time() - started:.2f}s.", flush=True)
 
 
@@ -318,7 +598,7 @@ def main() -> None:
     mp.set_start_method("spawn", force=True)
 
     args.markdown_dir.mkdir(parents=True, exist_ok=True)
-    args.persist_dir.parent.mkdir(parents=True, exist_ok=True)
+    args.persist_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Finding PDF files in {args.data_dir}...", flush=True)
     pdf_files = list(args.data_dir.rglob("*.pdf"))

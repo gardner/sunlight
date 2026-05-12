@@ -2,6 +2,9 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import quote
+
+import lancedb
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "parallel_convert_and_embed.py"
@@ -24,16 +27,64 @@ class FakeQueue:
 
 
 class ParallelConvertAndEmbedTests(unittest.TestCase):
-    def test_safe_markdown_path_matches_existing_naming(self):
+    def test_safe_markdown_path_disambiguates_duplicate_filenames(self):
         module = load_module()
 
-        self.assertEqual(
-            module.safe_markdown_path(
-                Path("/source/Some%20PDF Name.pdf"),
-                Path("/out"),
-            ),
-            Path("/out/Some_PDF_Name.pdf.md"),
+        first = module.safe_markdown_path(
+            Path("/source/request/100/response/200/attach/1/Some%20PDF Name.pdf"),
+            Path("/out"),
         )
+        second = module.safe_markdown_path(
+            Path("/source/request/101/response/201/attach/2/Some%20PDF Name.pdf"),
+            Path("/out"),
+        )
+
+        self.assertEqual(first.suffix, ".md")
+        self.assertIn("Some_PDF_Name.pdf", first.name)
+        self.assertNotEqual(first, second)
+
+    def test_build_document_metadata_extracts_fyi_provenance(self):
+        module = load_module()
+        pdf_path = Path(
+            "/mnt/dgx-ssd/src/sunlight_nz/fyi/data/request/12117/response/47232/attach/2/Morrison%20OIA%20response.pdf"
+        )
+        markdown_path = Path("/tmp/doc_fyi_12117.md")
+
+        metadata = module.build_document_metadata(pdf_path, markdown_path)
+
+        self.assertEqual(metadata["source"], "fyi")
+        self.assertEqual(metadata["fyi_request_id"], 12117)
+        self.assertEqual(metadata["fyi_response_id"], 47232)
+        self.assertEqual(metadata["fyi_attachment_id"], 2)
+        self.assertEqual(metadata["request_url"], "https://fyi.org.nz/request/12117")
+        self.assertEqual(
+            metadata["source_url"],
+            "https://fyi.org.nz/request/12117/response/47232/attach/2/"
+            + quote("Morrison OIA response.pdf"),
+        )
+        self.assertEqual(
+            metadata["markdown_r2_key"],
+            "markdown/fyi/v1/request/12117/response/47232/attach/2/"
+            + metadata["document_id"]
+            + ".md",
+        )
+
+    def test_markdown_front_matter_round_trips(self):
+        module = load_module()
+        metadata = {
+            "document_id": "doc_fyi_1_2_3_abcd1234",
+            "source": "fyi",
+            "source_url": "https://example.test/file.pdf",
+            "request_url": "https://example.test/request/1",
+            "fyi_request_id": 1,
+        }
+        body = "# Heading\n\nBody text.\n"
+
+        rendered = module.render_markdown_document(metadata, body)
+        parsed_metadata, parsed_body = module.parse_markdown_document(rendered)
+
+        self.assertEqual(parsed_metadata, metadata)
+        self.assertEqual(parsed_body, body)
 
     def test_put_markdown_for_embedding_skips_embedded_files(self):
         module = load_module()
@@ -57,6 +108,42 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
 
             self.assertTrue(module.put_markdown_for_embedding(fake_queue, markdown_path))
             self.assertEqual(fake_queue.items, [str(markdown_path)])
+
+    def test_lancedb_writer_deduplicates_chunk_ids(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            persist_dir = Path(tmp_dir) / "vectors.lancedb"
+            writer = module.LanceDBChunkWriter(persist_dir)
+            record = {
+                "chunk_id": "chunk_doc_0001_abcd1234",
+                "vector": [0.1, 0.2],
+                "document_id": "doc_1",
+                "chunk_index": 0,
+                "chunk_text": "hello world",
+                "text_preview": "hello world",
+                "source": "fyi",
+                "source_url": "https://example.test/file.pdf",
+                "request_url": "https://example.test/request/1",
+                "fyi_request_id": 1,
+                "fyi_response_id": 2,
+                "fyi_attachment_id": 3,
+                "original_filename": "file.pdf",
+                "pdf_r2_key": "canonical/fyi/v1/pdf/request/1/response/2/attach/3/file.pdf",
+                "markdown_r2_key": "markdown/fyi/v1/request/1/response/2/attach/3/doc_1.md",
+                "markdown_path": "/tmp/doc_1.md",
+                "embedding_model": "test-model",
+                "text_sha256": "abc123",
+                "created_at": "2026-05-12T00:00:00Z",
+                "vectorize_uploaded_at": None,
+            }
+
+            writer.add_records([record])
+            writer.add_records([record])
+
+            db = lancedb.connect(str(persist_dir))
+            table = db.open_table(module.DEFAULT_TABLE_NAME)
+            self.assertEqual(table.count_rows(), 1)
 
 
 if __name__ == "__main__":
