@@ -44,16 +44,17 @@ DEFAULT_DATA_DIR = Path("fyi/data/request")
 DEFAULT_MARKDOWN_DIR = Path("fyi/markdown")
 DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel.lancedb")
 DEFAULT_TABLE_NAME = "chunks"
-DEFAULT_CONVERT_WORKERS = 6
+DEFAULT_CONVERT_WORKERS = 10
 DEFAULT_EMBED_BATCH_SIZE = 200
 DEFAULT_MARKDOWN_QUEUE_SIZE = 128
 DEFAULT_MAX_TASKS_PER_WORKER = 25
 DEFAULT_CHUNK_SIZE = 1024
 # AIDEV-NOTE: Qwen3-Embedding-0.6B fp16 with batch=64/seq=1024 uses <8 GB.
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 64
-# AIDEV-NOTE: Conversion workers round-robin across both GPUs; embedding
-# pins to GPU 1 and shares the card with half the OCR pool (Qwen is small).
-DEFAULT_CONVERT_GPU = "0,1"
+# AIDEV-NOTE: Conversion workers round-robin across the GPU list; the
+# "0,1,0" pattern biases 2:1 toward GPU 0 to offset the embedder that
+# also lives on GPU 1.
+DEFAULT_CONVERT_GPU = "0,1,0"
 DEFAULT_EMBED_GPU = "1"
 
 _cached_converter = None

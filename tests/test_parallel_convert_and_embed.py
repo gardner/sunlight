@@ -133,7 +133,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
 
         args = module.build_parser().parse_args([])
 
-        self.assertEqual(args.convert_gpu, "0,1")
+        self.assertEqual(args.convert_gpu, "0,1,0")
         self.assertEqual(args.embed_gpu, "1")
 
     def test_init_convert_worker_round_robins_across_gpus(self):
