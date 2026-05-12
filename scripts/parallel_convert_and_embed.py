@@ -28,6 +28,7 @@ import gc
 import hashlib
 import json
 import multiprocessing as mp
+import os
 import queue
 import re
 import time
@@ -43,15 +44,28 @@ DEFAULT_DATA_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/data/request")
 DEFAULT_MARKDOWN_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/markdown")
 DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel.lancedb")
 DEFAULT_TABLE_NAME = "chunks"
-DEFAULT_CONVERT_WORKERS = 3
-DEFAULT_EMBED_BATCH_SIZE = 50
-DEFAULT_MARKDOWN_QUEUE_SIZE = 32
+DEFAULT_CONVERT_WORKERS = 6
+DEFAULT_EMBED_BATCH_SIZE = 200
+DEFAULT_MARKDOWN_QUEUE_SIZE = 128
 DEFAULT_MAX_TASKS_PER_WORKER = 25
 DEFAULT_CHUNK_SIZE = 1024
 DEFAULT_CHUNK_OVERLAP = 128
-DEFAULT_MODEL_EMBED_BATCH_SIZE = 4
+# AIDEV-NOTE: Qwen3-Embedding-0.6B in fp16 (~1.2 GB) plus activations for
+# seq_len=1024, batch=64 fits comfortably in <8 GB on a 32 GB card. Larger
+# batches reduce per-call launch overhead, which was the dominant cost at
+# batch=4.
+DEFAULT_MODEL_EMBED_BATCH_SIZE = 64
+# AIDEV-NOTE: Pin Docling/OCR to GPU 0 and the embedding worker to GPU 1
+# so the two workloads stop fighting for the same card. Override via CLI if
+# the hardware layout changes.
+DEFAULT_CONVERT_GPU = "0"
+DEFAULT_EMBED_GPU = "1"
 
 _cached_converter = None
+
+
+def _init_convert_worker(gpu_index: str) -> None:
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,6 +90,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_TASKS_PER_WORKER,
         help="Recycle each Docling worker after this many PDFs. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--convert-gpu",
+        type=str,
+        default=DEFAULT_CONVERT_GPU,
+        help="CUDA_VISIBLE_DEVICES value for Docling conversion workers.",
+    )
+    parser.add_argument(
+        "--embed-gpu",
+        type=str,
+        default=DEFAULT_EMBED_GPU,
+        help="CUDA_VISIBLE_DEVICES value for the embedding worker.",
     )
     return parser
 
@@ -430,7 +456,10 @@ def embedding_worker(
     chunk_size: int,
     chunk_overlap: int,
     model_embed_batch_size: int,
+    embed_gpu_index: str,
 ) -> None:
+    os.environ["CUDA_VISIBLE_DEVICES"] = embed_gpu_index
+
     import torch
     from llama_index.core import Document
     from llama_index.core.node_parser import SentenceSplitter
@@ -438,7 +467,7 @@ def embedding_worker(
 
     embedding_model_name = "Qwen/Qwen3-Embedding-0.6B"
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Embedding worker loading Qwen model on {device}...", flush=True)
+    print(f"Embedding worker loading Qwen on {device} (CUDA_VISIBLE_DEVICES={embed_gpu_index})...", flush=True)
 
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -497,6 +526,7 @@ def run_conversion_pool(
     embed_process: mp.Process,
     convert_workers: int,
     max_tasks_per_worker: int,
+    convert_gpu_index: str,
 ) -> None:
     max_tasks = max_tasks_per_worker or None
     max_pending = max(convert_workers * 2, 1)
@@ -510,6 +540,8 @@ def run_conversion_pool(
     with ProcessPoolExecutor(
         max_workers=convert_workers,
         max_tasks_per_child=max_tasks,
+        initializer=_init_convert_worker,
+        initargs=(convert_gpu_index,),
     ) as executor:
         while submitted < len(pdf_files) and len(pending) < max_pending:
             pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir))
@@ -583,6 +615,7 @@ def main() -> None:
             args.chunk_size,
             args.chunk_overlap,
             args.model_embed_batch_size,
+            args.embed_gpu,
         ),
         name="fyi-embedding-worker",
     )
@@ -597,6 +630,7 @@ def main() -> None:
             embed_process,
             args.convert_workers,
             args.max_tasks_per_worker,
+            args.convert_gpu,
         )
     finally:
         if embed_process.is_alive():

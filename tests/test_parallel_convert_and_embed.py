@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
@@ -118,7 +119,30 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
 
         self.assertEqual(args.chunk_size, 1024)
         self.assertEqual(args.chunk_overlap, 128)
-        self.assertEqual(args.model_embed_batch_size, 4)
+        self.assertEqual(args.model_embed_batch_size, 64)
+
+    def test_default_gpu_indices_separate_workloads(self):
+        module = load_module()
+
+        args = module.build_parser().parse_args([])
+
+        self.assertEqual(args.convert_gpu, "0")
+        self.assertEqual(args.embed_gpu, "1")
+        self.assertNotEqual(args.convert_gpu, args.embed_gpu)
+
+    def test_init_convert_worker_pins_to_specified_gpu(self):
+        module = load_module()
+        original = os.environ.get("CUDA_VISIBLE_DEVICES")
+        try:
+            module._init_convert_worker("0")
+            self.assertEqual(os.environ["CUDA_VISIBLE_DEVICES"], "0")
+            module._init_convert_worker("1")
+            self.assertEqual(os.environ["CUDA_VISIBLE_DEVICES"], "1")
+        finally:
+            if original is None:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = original
 
     def test_lancedb_writer_deduplicates_chunk_ids(self):
         module = load_module()
