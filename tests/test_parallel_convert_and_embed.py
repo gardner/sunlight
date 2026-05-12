@@ -121,6 +121,14 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
         self.assertEqual(args.chunk_overlap, 128)
         self.assertEqual(args.model_embed_batch_size, 64)
 
+    def test_default_data_dirs_resolve_through_repo_symlink(self):
+        module = load_module()
+
+        args = module.build_parser().parse_args([])
+
+        self.assertEqual(args.data_dir, Path("fyi/data/request"))
+        self.assertEqual(args.markdown_dir, Path("fyi/markdown"))
+
     def test_default_gpu_indices_separate_workloads(self):
         module = load_module()
 

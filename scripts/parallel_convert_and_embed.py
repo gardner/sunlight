@@ -40,8 +40,8 @@ from urllib.parse import quote, unquote
 from fyi_lancedb_writer import LanceDBChunkWriter
 
 
-DEFAULT_DATA_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/data/request")
-DEFAULT_MARKDOWN_DIR = Path("/mnt/dgx-ssd/src/sunlight_nz/fyi/markdown")
+DEFAULT_DATA_DIR = Path("fyi/data/request")
+DEFAULT_MARKDOWN_DIR = Path("fyi/markdown")
 DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel.lancedb")
 DEFAULT_TABLE_NAME = "chunks"
 DEFAULT_CONVERT_WORKERS = 6
