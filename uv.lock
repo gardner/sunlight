@@ -1145,6 +1145,20 @@ wheels = [
 ]
 
 [[package]]
+name = "llama-index-embeddings-huggingface"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "llama-index-core" },
+    { name = "sentence-transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a1/b3/faa44f7c9edaaefb6f7e1d8a306433c4ccc5ea5bde92302bec149e62b838/llama_index_embeddings_huggingface-0.7.0.tar.gz", hash = "sha256:da8a2a65df9404112c4430dfada09d4f846ba165197a25dbe77f734014c56a87", size = 8692, upload-time = "2026-03-12T20:20:31.588Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/25/86/dc43deab70f19db4fcdd82337e18b7f5b828478c486d6308cea10def87c5/llama_index_embeddings_huggingface-0.7.0-py3-none-any.whl", hash = "sha256:cae7e4ffddc1fecb34b83425a00679f338ce03ad0a7f3aca6b927136d6af7131", size = 8904, upload-time = "2026-03-12T20:20:32.449Z" },
+]
+
+[[package]]
 name = "llama-index-instrumentation"
 version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2875,6 +2889,8 @@ dependencies = [
     { name = "dnspython" },
     { name = "docling" },
     { name = "lancedb" },
+    { name = "llama-index-core" },
+    { name = "llama-index-embeddings-huggingface" },
     { name = "llama-index-readers-docling" },
     { name = "pylance" },
     { name = "sentence-transformers" },
@@ -2895,6 +2911,8 @@ requires-dist = [
     { name = "dnspython", specifier = ">=2.8.0" },
     { name = "docling", specifier = ">=2.93.0" },
     { name = "lancedb", specifier = ">=0.30.2" },
+    { name = "llama-index-core", specifier = ">=0.14.21" },
+    { name = "llama-index-embeddings-huggingface", specifier = ">=0.7.0" },
     { name = "llama-index-readers-docling", specifier = ">=0.4.2" },
     { name = "pylance", specifier = ">=6.0.0" },
     { name = "sentence-transformers", specifier = ">=5.4.1" },

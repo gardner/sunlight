@@ -84,7 +84,9 @@ def validate_args(args) -> None:
 
 def open_chunks_table(persist_dir: Path, table_name: str):
     db = lancedb.connect(str(persist_dir))
-    table_names = set(db.list_tables())
+    listed = db.list_tables()
+    raw_names = listed.tables if hasattr(listed, "tables") else listed
+    table_names = set(raw_names)
     if table_name not in table_names:
         raise SystemExit(
             f"LanceDB table {table_name!r} not found in {persist_dir}. "

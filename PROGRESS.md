@@ -170,6 +170,7 @@ Completed:
 * Added deterministic markdown filenames with path hashes so duplicate FYI attachment names no longer overwrite each other or share `.failed`/`.embedded` markers.
 * Added provenance front matter to converted FYI markdown files so each document carries its FYI request URL, source PDF URL, stable document id, and planned R2 keys into downstream retrieval.
 * Replaced the old LlamaIndex export script with a streaming LanceDB-to-Vectorize NDJSON exporter using `pylance`, so the final Vectorize handoff no longer has to load the whole table into memory.
+* Smoke-tested the LanceDB pipeline against real FYI PDFs, then fixed the missing direct HuggingFace embedding dependency and a LanceDB table-list compatibility bug in the Vectorize exporter that the test exposed.
 
 ## Verification
 
@@ -192,7 +193,9 @@ uv run python scripts/scrape_authority_contacts.py --remote --limit 20 --retry-a
 BRAVE_SEARCH_API_KEY=... uv run python scripts/scrape_authority_contacts.py --brave-search --source-file /tmp/sunlight-known-authorities.json --limit 8 --max-pages-per-authority 20 --timeout 8 --write-sql /tmp/sunlight-known-contact-candidates-brave.sql --delay-ms 250
 uv run python scripts/parallel_convert_and_embed.py --help
 uv run python -m unittest tests/test_parallel_convert_and_embed.py
-uv run ruff check scripts/parallel_convert_and_embed.py tests/test_parallel_convert_and_embed.py
+uv run ruff check scripts/parallel_convert_and_embed.py scripts/export_to_vectorize.py tests/test_parallel_convert_and_embed.py
+uv run python scripts/parallel_convert_and_embed.py --data-dir /tmp/fyi-smoke/data/request --markdown-dir /tmp/fyi-smoke/markdown --persist-dir /tmp/fyi-smoke/fyi-test.lancedb --convert-workers 1 --embed-batch-size 2 --markdown-queue-size 4 --max-tasks-per-worker 1
+uv run python scripts/export_to_vectorize.py --persist-dir /tmp/fyi-smoke/fyi-test.lancedb --output-dir /tmp/fyi-smoke/vectorize-out --rows-per-file 1000
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm admin:build
@@ -245,7 +248,7 @@ Important naming boundary:
 ## Next Steps
 
 1. Add an R2 upload command for `sunlight-corpus` that uploads only canonical PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local metadata.
-2. Run the FYI ingestion again against the LanceDB-backed pipeline and watch Docling worker RSS plus LanceDB growth to confirm memory stays flat.
+2. Run the full FYI ingestion again against the LanceDB-backed pipeline and watch Docling worker RSS plus LanceDB growth to confirm memory stays flat over a long run.
 3. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and run the first eval set against both pipelines.
 4. Run the streaming LanceDB-to-Vectorize export, then upload main-pipeline vectors with `source_url`, `request_url`, and `markdown_r2_key` metadata.
 5. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.
