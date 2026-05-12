@@ -165,7 +165,7 @@ Completed:
 * Reworked FYI PDF ingestion to use three recycled Docling conversion workers feeding a bounded Markdown queue consumed by one embedding worker, avoiding an all-convert-then-embed memory spike.
 * Created a watchdog script (`scripts/watchdog.sh`) with `.failed` lockfiles to automatically skip corrupt PDFs causing SegFaults and seamlessly restart the pipeline.
 * Wrote `scripts/export_to_vectorize.py` to seamlessly convert local LlamaIndex vectors to Cloudflare Vectorize NDJSON format.
-* Documented the revised vector storage plan in `docs/VECTORS.md`, recommending a streaming SQLite vector spool for local ingestion, Vectorize for deployed search, R2 for full markdown/PDF artifacts, and D1 for structured metadata.
+* Documented the revised vector storage plan in `docs/VECTORS.md`, now using a dual-pipeline eval: Docling plus LanceDB plus Vectorize for the controlled main path, and R2 markdown plus Cloudflare AI Search for the managed path.
 
 ## Verification
 
@@ -240,12 +240,13 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Replace the FYI ingestion LlamaIndex JSON persistence with the SQLite vector spool described in `docs/VECTORS.md`.
-2. Update `scripts/export_to_vectorize.py` to stream SQLite vector BLOBs into <= 5000-vector NDJSON upload files.
-3. Resume FYI PDF ingestion with `uv run scripts/parallel_convert_and_embed.py` or `scripts/watchdog.sh`, watching Docling worker RSS and SQLite write throughput.
-4. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.
-5. Run `wrangler vectorize create` and `wrangler vectorize insert` to push the NDJSON to the edge.
-6. Do a controlled live Cloudflare Email Sending test before sending to real
+1. Update FYI conversion to emit markdown with provenance front matter, including FYI source PDF URLs and request URLs.
+2. Add an R2 upload command for `sunlight-corpus` that uploads only canonical PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local metadata.
+3. Replace the FYI ingestion LlamaIndex JSON persistence with the LanceDB streaming store described in `docs/VECTORS.md`.
+4. Upload main-pipeline vectors to Vectorize with `source_url`, `request_url`, and `markdown_r2_key` metadata.
+5. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and run the first eval set against both pipelines.
+6. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.
+7. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-7. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+8. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
