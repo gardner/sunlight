@@ -11,6 +11,7 @@ wheels/
 
 # Local secrets
 .env
+apps/*/.dev.vars
 
 # Cloudflare local development state
 .wrangler/
@@ -19,3 +20,14 @@ apps/*/.wrangler/
 # JavaScript dependencies and build output
 node_modules/
 apps/*/dist/
+
+# Local logs and fixtures
+*.eml
+tail.log
+apps/*/dev.log
+
+# Generated FYI/vector artifacts
+storage/
+fyi_vectors.ndjson
+current_templates.json
+stitch_open_data_project_brief.zip
