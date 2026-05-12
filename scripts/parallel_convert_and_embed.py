@@ -50,22 +50,21 @@ DEFAULT_MARKDOWN_QUEUE_SIZE = 128
 DEFAULT_MAX_TASKS_PER_WORKER = 25
 DEFAULT_CHUNK_SIZE = 1024
 DEFAULT_CHUNK_OVERLAP = 128
-# AIDEV-NOTE: Qwen3-Embedding-0.6B in fp16 (~1.2 GB) plus activations for
-# seq_len=1024, batch=64 fits comfortably in <8 GB on a 32 GB card. Larger
-# batches reduce per-call launch overhead, which was the dominant cost at
-# batch=4.
+# AIDEV-NOTE: Qwen3-Embedding-0.6B fp16 with batch=64/seq=1024 uses <8 GB.
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 64
-# AIDEV-NOTE: Pin Docling/OCR to GPU 0 and the embedding worker to GPU 1
-# so the two workloads stop fighting for the same card. Override via CLI if
-# the hardware layout changes.
-DEFAULT_CONVERT_GPU = "0"
+# AIDEV-NOTE: Conversion workers round-robin across both GPUs; embedding
+# pins to GPU 1 and shares the card with half the OCR pool (Qwen is small).
+DEFAULT_CONVERT_GPU = "0,1"
 DEFAULT_EMBED_GPU = "1"
 
 _cached_converter = None
 
 
-def _init_convert_worker(gpu_index: str) -> None:
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
+def _init_convert_worker(counter, gpu_list: list[str]) -> None:
+    with counter.get_lock():
+        idx = counter.value
+        counter.value += 1
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_list[idx % len(gpu_list)]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--convert-gpu",
         type=str,
         default=DEFAULT_CONVERT_GPU,
-        help="CUDA_VISIBLE_DEVICES value for Docling conversion workers.",
+        help="Comma-separated CUDA_VISIBLE_DEVICES values; conversion workers round-robin across them.",
     )
     parser.add_argument(
         "--embed-gpu",
@@ -526,7 +525,7 @@ def run_conversion_pool(
     embed_process: mp.Process,
     convert_workers: int,
     max_tasks_per_worker: int,
-    convert_gpu_index: str,
+    convert_gpu_list: list[str],
 ) -> None:
     max_tasks = max_tasks_per_worker or None
     max_pending = max(convert_workers * 2, 1)
@@ -536,12 +535,13 @@ def run_conversion_pool(
     failed = 0
     queued_for_embedding = 0
     pending = set()
+    gpu_counter = mp.Value("i", 0)
 
     with ProcessPoolExecutor(
         max_workers=convert_workers,
         max_tasks_per_child=max_tasks,
         initializer=_init_convert_worker,
-        initargs=(convert_gpu_index,),
+        initargs=(gpu_counter, convert_gpu_list),
     ) as executor:
         while submitted < len(pdf_files) and len(pending) < max_pending:
             pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir))
@@ -595,6 +595,7 @@ def main() -> None:
         raise SystemExit("--chunk-overlap must be smaller than --chunk-size")
     if args.model_embed_batch_size < 1:
         raise SystemExit("--model-embed-batch-size must be at least 1")
+    convert_gpu_list = [g.strip() for g in args.convert_gpu.split(",")]
 
     mp.set_start_method("spawn", force=True)
 
@@ -630,7 +631,7 @@ def main() -> None:
             embed_process,
             args.convert_workers,
             args.max_tasks_per_worker,
-            args.convert_gpu,
+            convert_gpu_list,
         )
     finally:
         if embed_process.is_alive():

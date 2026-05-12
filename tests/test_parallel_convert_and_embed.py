@@ -129,22 +129,44 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
         self.assertEqual(args.data_dir, Path("fyi/data/request"))
         self.assertEqual(args.markdown_dir, Path("fyi/markdown"))
 
-    def test_default_gpu_indices_separate_workloads(self):
+    def test_default_gpu_layout_spans_both_cards(self):
         module = load_module()
 
         args = module.build_parser().parse_args([])
 
-        self.assertEqual(args.convert_gpu, "0")
+        self.assertEqual(args.convert_gpu, "0,1")
         self.assertEqual(args.embed_gpu, "1")
-        self.assertNotEqual(args.convert_gpu, args.embed_gpu)
 
-    def test_init_convert_worker_pins_to_specified_gpu(self):
+    def test_init_convert_worker_round_robins_across_gpus(self):
+        import multiprocessing as mp
+
         module = load_module()
+        counter = mp.Value("i", 0)
         original = os.environ.get("CUDA_VISIBLE_DEVICES")
         try:
-            module._init_convert_worker("0")
-            self.assertEqual(os.environ["CUDA_VISIBLE_DEVICES"], "0")
-            module._init_convert_worker("1")
+            module._init_convert_worker(counter, ["0", "1"])
+            first = os.environ["CUDA_VISIBLE_DEVICES"]
+            module._init_convert_worker(counter, ["0", "1"])
+            second = os.environ["CUDA_VISIBLE_DEVICES"]
+            module._init_convert_worker(counter, ["0", "1"])
+            third = os.environ["CUDA_VISIBLE_DEVICES"]
+            self.assertEqual([first, second, third], ["0", "1", "0"])
+        finally:
+            if original is None:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = original
+
+    def test_init_convert_worker_pins_single_gpu(self):
+        import multiprocessing as mp
+
+        module = load_module()
+        counter = mp.Value("i", 0)
+        original = os.environ.get("CUDA_VISIBLE_DEVICES")
+        try:
+            module._init_convert_worker(counter, ["1"])
+            self.assertEqual(os.environ["CUDA_VISIBLE_DEVICES"], "1")
+            module._init_convert_worker(counter, ["1"])
             self.assertEqual(os.environ["CUDA_VISIBLE_DEVICES"], "1")
         finally:
             if original is None:
