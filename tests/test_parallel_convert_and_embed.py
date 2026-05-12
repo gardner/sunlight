@@ -118,7 +118,6 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
         args = module.build_parser().parse_args([])
 
         self.assertEqual(args.chunk_size, 1024)
-        self.assertEqual(args.chunk_overlap, 128)
         self.assertEqual(args.model_embed_batch_size, 64)
 
     def test_default_data_dirs_resolve_through_repo_symlink(self):

@@ -49,7 +49,6 @@ DEFAULT_EMBED_BATCH_SIZE = 200
 DEFAULT_MARKDOWN_QUEUE_SIZE = 128
 DEFAULT_MAX_TASKS_PER_WORKER = 25
 DEFAULT_CHUNK_SIZE = 1024
-DEFAULT_CHUNK_OVERLAP = 128
 # AIDEV-NOTE: Qwen3-Embedding-0.6B fp16 with batch=64/seq=1024 uses <8 GB.
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 64
 # AIDEV-NOTE: Conversion workers round-robin across both GPUs; embedding
@@ -82,7 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embed-batch-size", type=int, default=DEFAULT_EMBED_BATCH_SIZE)
     parser.add_argument("--markdown-queue-size", type=int, default=DEFAULT_MARKDOWN_QUEUE_SIZE)
     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
-    parser.add_argument("--chunk-overlap", type=int, default=DEFAULT_CHUNK_OVERLAP)
     parser.add_argument("--model-embed-batch-size", type=int, default=DEFAULT_MODEL_EMBED_BATCH_SIZE)
     parser.add_argument(
         "--max-tasks-per-worker",
@@ -453,7 +451,6 @@ def embedding_worker(
     persist_dir: Path,
     embed_batch_size: int,
     chunk_size: int,
-    chunk_overlap: int,
     model_embed_batch_size: int,
     embed_gpu_index: str,
 ) -> None:
@@ -461,7 +458,7 @@ def embedding_worker(
 
     import torch
     from llama_index.core import Document
-    from llama_index.core.node_parser import SentenceSplitter
+    from llama_index.core.node_parser import MarkdownNodeParser
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
     embedding_model_name = "Qwen/Qwen3-Embedding-0.6B"
@@ -478,7 +475,7 @@ def embedding_worker(
         embed_batch_size=model_embed_batch_size,
         model_kwargs={"torch_dtype": torch.float16},
     )
-    parser = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    parser = MarkdownNodeParser()
     writer = LanceDBChunkWriter(persist_dir)
 
     batch: list[Path] = []
@@ -589,10 +586,6 @@ def main() -> None:
         raise SystemExit("--markdown-queue-size must be at least 1")
     if args.chunk_size < 1:
         raise SystemExit("--chunk-size must be at least 1")
-    if args.chunk_overlap < 0:
-        raise SystemExit("--chunk-overlap must be at least 0")
-    if args.chunk_overlap >= args.chunk_size:
-        raise SystemExit("--chunk-overlap must be smaller than --chunk-size")
     if args.model_embed_batch_size < 1:
         raise SystemExit("--model-embed-batch-size must be at least 1")
     convert_gpu_list = [g.strip() for g in args.convert_gpu.split(",")]
@@ -614,7 +607,6 @@ def main() -> None:
             args.persist_dir,
             args.embed_batch_size,
             args.chunk_size,
-            args.chunk_overlap,
             args.model_embed_batch_size,
             args.embed_gpu,
         ),
