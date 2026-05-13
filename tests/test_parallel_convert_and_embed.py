@@ -120,6 +120,16 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             self.assertFalse((out_dir / "empty.pdf__*.md").exists())
             self.assertIsInstance(info, str)
 
+    def test_parse_markdown_document_raises_on_missing_frontmatter(self):
+        module = load_module()
+        with self.assertRaises(ValueError):
+            module.parse_markdown_document("body without any frontmatter\n")
+
+    def test_parse_markdown_document_raises_on_unclosed_frontmatter(self):
+        module = load_module()
+        with self.assertRaises(ValueError):
+            module.parse_markdown_document("---\ndocument_id: foo\nbody here\n")
+
     def test_markdown_front_matter_round_trips(self):
         module = load_module()
         metadata = {

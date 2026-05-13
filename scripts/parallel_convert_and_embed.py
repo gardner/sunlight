@@ -240,11 +240,11 @@ def render_markdown_document(metadata: dict[str, object], body: str) -> str:
 
 def parse_markdown_document(text: str) -> tuple[dict[str, object], str]:
     if not text.startswith("---\n"):
-        return {}, text
+        raise ValueError("Markdown is missing opening frontmatter delimiter")
 
     end_index = text.find("\n---\n", 4)
     if end_index == -1:
-        return {}, text
+        raise ValueError("Markdown frontmatter has no closing delimiter")
 
     raw_metadata = text[4:end_index]
     body = text[end_index + len("\n---\n") :]
@@ -257,19 +257,10 @@ def parse_markdown_document(text: str) -> tuple[dict[str, object], str]:
             continue
         key, separator, raw_value = line.partition(":")
         if not separator:
-            return {}, text
+            raise ValueError(f"Malformed frontmatter line: {line!r}")
         metadata[key.strip()] = json.loads(raw_value.strip())
 
     return metadata, body
-
-
-def fallback_markdown_metadata(markdown_path: Path) -> dict[str, object]:
-    digest = stable_path_digest(markdown_path)
-    return {
-        "document_id": f"doc_markdown_{digest}",
-        "source": "local",
-        "original_filename": markdown_path.name,
-    }
 
 
 def get_converter():
@@ -448,8 +439,6 @@ def flush_embedding_batch(
             with open(md_path, "r", encoding="utf-8") as f:
                 raw_text = f.read()
             metadata, body = parse_markdown_document(raw_text)
-            if not metadata:
-                metadata = fallback_markdown_metadata(md_path)
             metadata["markdown_path"] = str(md_path)
             documents.append(document_class(text=body, metadata=metadata))
             embedded_paths.append(md_path)
