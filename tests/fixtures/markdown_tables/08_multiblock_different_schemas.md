@@ -88,3 +88,21 @@ Elapsed Times Released under the Official Information Act 1982
 | NHQN34217             | 25:47:35   |          | Information | 25:51:44              |
 
 | Date                 | Time           | Party Notified                                                                   |
+|----------------------|----------------|----------------------------------------------------------------------------------|
+| 08 Feb 2019          | 14:38:37       | AC HAYWOOD ADVISED                                                               |
+| 08 Feb 2019          | 14:41:04       | POLICE VIA INTERCAD                                                              |
+| 08 Feb 2019          | 14:43:20       | FROM MOUTERE FORWARD CONTROL - 2 HELIS WITH MONSOONS ON WAY TO THIS LOCARTIO the |
+| 08 Feb 2019          | 14:43:30       | AC HAYWOOD ADVISED                                                               |
+| 08 Feb 2019          | 14:43:37 under | POLICE VIA INTERCAD                                                              |
+| 08 Feb 2019          | 14:44:37       | RICHMOND HILL LOOKOUT ADVISE COMCEN OF FIRE SHORTLY AFTER K1 TAKEN AS NOTIFI     |
+| 08 Feb 2019          | 15:12:43       | RICHMOND HILL LOOKOUT ADVISED RE STOP FOR RABBIT ISLAND AND ASKED IF HE CAN      |
+| 08 Feb 2019 Released | 15:14:50       | COMCEN NATIONAL ON CALL ADVISED                                                  |
+| 08 Feb 2019          | 15:26:20       | AMBULANCE VIA INTERCAD                                                           |
+| 08 Feb 2019          | 15:31:57       | POLICE VIA INTERCAD                                                              |
+| 08 Feb 2019          | 15:56:28       | BLEN242 ADVISED TO REDUCE TO ROAD SPEED RESPONSE                                 |
+| 08 Feb 2019          | 16:00:14       | PICT301 ADVISED TO REDUCE TO ROAD SPEED RESPONSE                                 |
+| 08 Feb 2019          | 16:21:35       | PAGED FI TASMAN/MARLBOROUGH PINER AND MCLEAN RE IWA ROAD INCIDENT                |
+| 08 Feb 2019          | 17:38:23       | AC HAYWOOD ADVISED                                                               |
+| 08 Feb 2019          | 17:38:30       | POLICE VIA INTERCAD                                                              |
+| 08 Feb 2019          | 17:38:41       | FROM MOUTERE FORWARD CONTROL - 2 HELIS WITH MONSOONS ON WAY TO THIS LOCARTIO     |
+

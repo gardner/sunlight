@@ -26,4 +26,4 @@ Per-fixture expectations the tests should assert:
 Source paths in `fyi/markdown/` (full versions, not committed at full size):
 
 - `07_*` ← `DOIA_2324_0565_Daisy_Appendix.pdf__18dc8f92ea99.md` (lines 1–90 of 29,415)
-- `08_*` ← `F2706181_SMS_Report_Walters_Bluff_Redacted.pdf__6673a4f31575.md` (lines 1–90)
+- `08_*` ← `F2706181_SMS_Report_Walters_Bluff_Redacted.pdf__6673a4f31575.md` (lines 1–108)
