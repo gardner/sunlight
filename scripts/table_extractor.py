@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
 import re
 from dataclasses import dataclass
 
+import pandas as pd
+
 PIPE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
+SEPARATOR_ROW_RE = re.compile(r"^\s*\|[\s:\-|]+\|\s*$")
 
 
 @dataclass(frozen=True)
@@ -35,3 +39,21 @@ def detect_table_regions(markdown_body: str) -> list[TableRegion]:
 
     _flush(len(lines))
     return regions
+
+
+def parse_region(region: TableRegion) -> pd.DataFrame:
+    body_lines = [
+        ln.strip().strip("|")
+        for ln in region.lines
+        if not SEPARATOR_ROW_RE.match(ln)
+    ]
+    df = pd.read_csv(
+        io.StringIO("\n".join(body_lines)),
+        sep=r"\s*\|\s*",
+        engine="python",
+        skipinitialspace=True,
+        dtype=str,
+        keep_default_na=False,
+    )
+    df.columns = [str(c).strip() for c in df.columns]
+    return df

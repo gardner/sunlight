@@ -40,5 +40,19 @@ class DetectTableRegionsTests(unittest.TestCase):
         self.assertEqual(len(region.lines), 5)
 
 
+class ParseRegionTests(unittest.TestCase):
+    def test_tiny_clean_table_parses_to_3x2_dataframe(self):
+        body = read_fixture("01_tiny_clean.md")
+        region = table_extractor.detect_table_regions(body)[0]
+        df = table_extractor.parse_region(region)
+        self.assertEqual(df.shape, (3, 2))
+
+    def test_wide_table_parses_to_22x26_dataframe(self):
+        body = read_fixture("03_wide_table.md")
+        region = table_extractor.detect_table_regions(body)[0]
+        df = table_extractor.parse_region(region)
+        self.assertEqual(df.shape, (22, 26))
+
+
 if __name__ == "__main__":
     unittest.main()
