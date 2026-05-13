@@ -71,5 +71,23 @@ class ParseRegionTests(unittest.TestCase):
         self.assertEqual(df.shape, (6, 3))
 
 
+class GroupLogicalTablesTests(unittest.TestCase):
+    def test_single_region_yields_single_logical_table(self):
+        body = read_fixture("01_tiny_clean.md")
+        regions = table_extractor.detect_table_regions(body)
+        logical = table_extractor.group_into_logical_tables(regions)
+        self.assertEqual(len(logical), 1)
+        self.assertEqual(logical[0].regions, regions)
+
+    def test_different_schemas_yield_separate_logical_tables(self):
+        body = read_fixture("08_multiblock_different_schemas.md")
+        regions = table_extractor.detect_table_regions(body)
+        self.assertEqual(len(regions), 5)
+        logical = table_extractor.group_into_logical_tables(regions)
+        self.assertEqual(len(logical), 3)
+        column_counts = [lt.column_count for lt in logical]
+        self.assertEqual(column_counts, [6, 5, 3])
+
+
 if __name__ == "__main__":
     unittest.main()
