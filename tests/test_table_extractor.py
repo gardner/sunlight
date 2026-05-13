@@ -39,6 +39,17 @@ class DetectTableRegionsTests(unittest.TestCase):
         self.assertTrue(all("|" in ln for ln in region.lines))
         self.assertEqual(len(region.lines), 5)
 
+    def test_prose_surrounding_table_is_preserved(self):
+        body = read_fixture("04_prose_with_small_table.md")
+        lines = body.splitlines()
+        regions = table_extractor.detect_table_regions(body)
+        self.assertEqual(len(regions), 1)
+        region = regions[0]
+        prose_before = "\n".join(lines[: region.line_start])
+        prose_after = "\n".join(lines[region.line_end :])
+        self.assertIn("Pakuranga", prose_before)
+        self.assertNotIn("|", prose_after.replace("---", "").strip() or "x")
+
 
 class ParseRegionTests(unittest.TestCase):
     def test_tiny_clean_table_parses_to_3x2_dataframe(self):
@@ -52,6 +63,12 @@ class ParseRegionTests(unittest.TestCase):
         region = table_extractor.detect_table_regions(body)[0]
         df = table_extractor.parse_region(region)
         self.assertEqual(df.shape, (22, 26))
+
+    def test_small_clean_table_parses_to_6x3_dataframe(self):
+        body = read_fixture("02_small_clean.md")
+        region = table_extractor.detect_table_regions(body)[0]
+        df = table_extractor.parse_region(region)
+        self.assertEqual(df.shape, (6, 3))
 
 
 if __name__ == "__main__":
