@@ -132,5 +132,46 @@ class ParseLogicalTableTests(unittest.TestCase):
         self.assertTrue(any("AGVANCE LIMITED" in v for v in org_col))
 
 
+class CleanFooterLeakTests(unittest.TestCase):
+    def _df(self, values):
+        import pandas as pd
+
+        return pd.DataFrame({"col": values})
+
+    def test_strips_trailing_footer_tokens(self):
+        df = self._df(
+            [
+                "4U WOODFLOORING LIMITED Act",
+                "AIIZ ASBESTOS & DEMOLITION LIMITED 1982",
+                "ALL NEW ZEALAND FINANCIAL SERVICES LIMITED Information",
+                "NORMAL COMPANY LIMITED",
+            ]
+        )
+        out = table_extractor.clean_footer_leak(
+            df, "Released under the Official Information Act 1982"
+        )
+        self.assertEqual(
+            out["col"].tolist(),
+            [
+                "4U WOODFLOORING LIMITED",
+                "AIIZ ASBESTOS & DEMOLITION LIMITED",
+                "ALL NEW ZEALAND FINANCIAL SERVICES LIMITED",
+                "NORMAL COMPANY LIMITED",
+            ],
+        )
+
+    def test_preserves_legitimate_interior_uses(self):
+        df = self._df(["INFORMATION SYSTEMS LIMITED"])
+        out = table_extractor.clean_footer_leak(
+            df, "Released under the Official Information Act 1982"
+        )
+        self.assertEqual(out["col"].tolist(), ["INFORMATION SYSTEMS LIMITED"])
+
+    def test_no_footer_phrase_is_noop(self):
+        df = self._df(["4U WOODFLOORING LIMITED Act"])
+        out = table_extractor.clean_footer_leak(df, None)
+        self.assertEqual(out["col"].tolist(), ["4U WOODFLOORING LIMITED Act"])
+
+
 if __name__ == "__main__":
     unittest.main()

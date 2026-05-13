@@ -179,3 +179,31 @@ def parse_region(region: TableRegion) -> pd.DataFrame:
 
 def parse_logical_table(table: LogicalTable) -> pd.DataFrame:
     return _read_pipe_csv(_clean_body_lines(table.regions))
+
+
+_PUNCT_RE = re.compile(r"[^\w]+")
+
+
+def _normalize_token(token: str) -> str:
+    return _PUNCT_RE.sub("", token).lower()
+
+
+def _strip_footer_tokens(cell: str, footer_vocab: set[str]) -> str:
+    tokens = cell.split()
+    while tokens and _normalize_token(tokens[-1]) in footer_vocab:
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def clean_footer_leak(df: pd.DataFrame, footer_phrase: str | None) -> pd.DataFrame:
+    if not footer_phrase:
+        return df
+    vocab = {_normalize_token(t) for t in footer_phrase.split() if _normalize_token(t)}
+    if not vocab:
+        return df
+    cleaned = df.copy()
+    for col in cleaned.columns:
+        cleaned[col] = cleaned[col].astype(str).map(
+            lambda v: _strip_footer_tokens(v, vocab)
+        )
+    return cleaned
