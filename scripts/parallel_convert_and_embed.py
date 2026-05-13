@@ -386,7 +386,12 @@ def build_chunk_records(nodes, markdown_paths: list[Path], embedding_model_name:
     for node in nodes:
         metadata = dict(getattr(node, "metadata", {}) or {})
         chunk_text = node_text(node)
-        document_id = str(metadata.get("document_id") or f"doc_markdown_{stable_path_digest(Path(markdown_paths[0]))}")
+        document_id = metadata.get("document_id")
+        if not document_id:
+            raise ValueError(
+                f"Node metadata is missing document_id: {metadata!r}"
+            )
+        document_id = str(document_id)
         chunk_index = chunk_counts.get(document_id, 0)
         chunk_counts[document_id] = chunk_index + 1
 

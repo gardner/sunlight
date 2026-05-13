@@ -231,6 +231,18 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             else:
                 os.environ["CUDA_VISIBLE_DEVICES"] = original
 
+    def test_build_chunk_records_requires_document_id(self):
+        module = load_module()
+
+        class FakeNode:
+            text = "chunk body text"
+            metadata = {"source": "fyi", "original_filename": "f.pdf"}
+
+        with self.assertRaises(ValueError):
+            module.build_chunk_records(
+                [FakeNode()], [Path("/tmp/foo.md")], "test-model"
+            )
+
     def test_lancedb_writer_deduplicates_chunk_ids(self):
         module = load_module()
 
