@@ -231,6 +231,86 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             else:
                 os.environ["CUDA_VISIBLE_DEVICES"] = original
 
+    def test_convert_pdf_to_md_does_not_pretouch_failed_marker(self):
+        """If a worker is OOM-killed mid-convert (no exception path runs)
+        the .failed marker must not have been written ahead of time."""
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "ghost.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 not really a pdf")
+            out_dir = Path(tmp_dir) / "md"
+            out_dir.mkdir()
+
+            md_path = module.safe_markdown_path(pdf_path, out_dir)
+            failed_marker = module.failed_marker_path(md_path)
+
+            class Probe:
+                touched_before_convert = False
+
+                def convert(self, _):
+                    Probe.touched_before_convert = failed_marker.exists()
+                    raise RuntimeError("simulated docling crash")
+
+            original_converter = module.get_converter
+            original_rescue = module.rescue_pdf_to_md_with_pymupdf
+            module.get_converter = lambda: Probe()
+            module.rescue_pdf_to_md_with_pymupdf = (
+                lambda *_a, **_k: (False, pdf_path, "stubbed rescue failure")
+            )
+            try:
+                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir)
+            finally:
+                module.get_converter = original_converter
+                module.rescue_pdf_to_md_with_pymupdf = original_rescue
+
+            self.assertFalse(ok)
+            self.assertFalse(
+                Probe.touched_before_convert,
+                ".failed marker must not exist before conversion runs",
+            )
+            self.assertTrue(
+                failed_marker.exists(),
+                ".failed marker should be written only after permanent failure",
+            )
+
+    def test_convert_pdf_to_md_succeeds_without_failed_marker(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "ok.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 not really a pdf")
+            out_dir = Path(tmp_dir) / "md"
+            out_dir.mkdir()
+
+            md_path = module.safe_markdown_path(pdf_path, out_dir)
+            failed_marker = module.failed_marker_path(md_path)
+
+            class FakeDoc:
+                @staticmethod
+                def export_to_markdown():
+                    return "body content"
+
+            class FakeResult:
+                document = FakeDoc()
+
+            class Converter:
+                def convert(self, _):
+                    return FakeResult()
+
+            original = module.get_converter
+            module.get_converter = lambda: Converter()
+            try:
+                ok, _, result = module.convert_pdf_to_md(pdf_path, out_dir)
+            finally:
+                module.get_converter = original
+
+            self.assertTrue(ok)
+            self.assertFalse(
+                failed_marker.exists(),
+                "successful conversion must not leave a .failed marker",
+            )
+
     def test_build_chunk_records_requires_document_id(self):
         module = load_module()
 

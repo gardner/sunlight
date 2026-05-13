@@ -313,8 +313,6 @@ def convert_pdf_to_md(pdf_path: Path, out_dir: Path) -> tuple[bool, Path, Path |
     if failed_file.exists():
         return False, pdf_path, "Skipped due to previous critical failure (.failed lock exists)"
 
-    failed_file.touch()
-
     try:
         converter = get_converter()
         result = converter.convert(str(pdf_path))
@@ -324,13 +322,12 @@ def convert_pdf_to_md(pdf_path: Path, out_dir: Path) -> tuple[bool, Path, Path |
         with open(md_file_path, "w", encoding="utf-8") as f:
             f.write(render_markdown_document(metadata, body))
 
-        failed_file.unlink(missing_ok=True)
         return True, pdf_path, md_file_path
     except Exception as docling_exc:
         rescued, _, info = rescue_pdf_to_md_with_pymupdf(pdf_path, out_dir)
         if rescued:
-            failed_file.unlink(missing_ok=True)
             return True, pdf_path, info
+        failed_file.touch()
         return False, pdf_path, f"docling: {docling_exc} | rescue: {info}"
 
 
