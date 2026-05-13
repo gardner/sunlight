@@ -177,7 +177,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
 
         self.assertEqual(args.chunk_size, 8192)
         self.assertEqual(args.chunk_overlap, 128)
-        self.assertEqual(args.model_embed_batch_size, 16)
+        self.assertEqual(args.model_embed_batch_size, 8)
 
     def test_default_data_dirs_resolve_through_repo_symlink(self):
         module = load_module()
@@ -285,7 +285,6 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             pdf_path.write_bytes(b"%PDF-1.4 not really a pdf")
             out_dir = Path(tmp_dir) / "md"
             out_dir.mkdir()
-            tables_dir = Path(tmp_dir) / "tables"
 
             md_path = module.safe_markdown_path(pdf_path, out_dir)
             failed_marker = module.failed_marker_path(md_path)
@@ -304,7 +303,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
                 lambda *_a, **_k: (False, pdf_path, "stubbed rescue failure")
             )
             try:
-                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir, tables_dir)
+                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir)
             finally:
                 module.get_converter = original_converter
                 module.rescue_pdf_to_md_with_pymupdf = original_rescue
@@ -327,7 +326,6 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             pdf_path.write_bytes(b"%PDF-1.4 not really a pdf")
             out_dir = Path(tmp_dir) / "md"
             out_dir.mkdir()
-            tables_dir = Path(tmp_dir) / "tables"
 
             md_path = module.safe_markdown_path(pdf_path, out_dir)
             failed_marker = module.failed_marker_path(md_path)
@@ -335,7 +333,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             original = module.get_converter
             module.get_converter = lambda: self._stub_converter(module, "body content")
             try:
-                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir, tables_dir)
+                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir)
             finally:
                 module.get_converter = original
 
@@ -345,40 +343,12 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
                 "successful conversion must not leave a .failed marker",
             )
 
-    def test_convert_pdf_to_md_extracts_tables_to_sidecar(self):
+    def test_embedded_marker_path_includes_pipeline_version(self):
         module = load_module()
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            pdf_path = Path(tmp_dir) / "with_table.pdf"
-            pdf_path.write_bytes(b"%PDF-1.4")
-            out_dir = Path(tmp_dir) / "md"
-            out_dir.mkdir()
-            tables_dir = Path(tmp_dir) / "tables"
-
-            body = (
-                "Prose before the table.\n\n"
-                "| col1 | col2 |\n"
-                "|------|------|\n"
-                "| foo  | bar  |\n"
-                "| baz  | qux  |\n"
-                "\nProse after.\n"
-            )
-
-            original = module.get_converter
-            module.get_converter = lambda: self._stub_converter(module, body)
-            try:
-                ok, _, md_path = module.convert_pdf_to_md(pdf_path, out_dir, tables_dir)
-            finally:
-                module.get_converter = original
-
-            self.assertTrue(ok)
-            csv_files = list(tables_dir.glob("*.csv"))
-            self.assertEqual(len(csv_files), 1)
-            rendered = md_path.read_text(encoding="utf-8")
-            self.assertNotIn("| foo  | bar  |", rendered)
-            self.assertIn("Table:", rendered)
-            self.assertIn("Prose before the table.", rendered)
-            self.assertIn("Prose after.", rendered)
+        marker = module.embedded_marker_path(Path("/tmp/foo.md"))
+        self.assertEqual(
+            marker.name, f"foo.md.embedded.{module.PIPELINE_VERSION}"
+        )
 
     def test_build_chunk_records_requires_document_id(self):
         module = load_module()
@@ -397,7 +367,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             persist_dir = Path(tmp_dir) / "vectors.lancedb"
-            writer = module.LanceDBChunkWriter(persist_dir)
+            writer = module.LanceDBChunkWriter(persist_dir, table_name=module.DEFAULT_TABLE_NAME)
             record = {
                 "chunk_id": "chunk_doc_0001_abcd1234",
                 "vector": [0.1, 0.2],

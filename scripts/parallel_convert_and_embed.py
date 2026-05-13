@@ -50,14 +50,15 @@ DEFAULT_DATA_DIR = Path("fyi/data/request")
 DEFAULT_MARKDOWN_DIR = Path("fyi/markdown")
 DEFAULT_TABLES_DIR = Path("fyi/markdown/tables")
 DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel.lancedb")
-DEFAULT_TABLE_NAME = "chunks"
+DEFAULT_TABLE_NAME = "chunks_v2"
+PIPELINE_VERSION = "v2"
 DEFAULT_CONVERT_WORKERS = 10
 DEFAULT_EMBED_BATCH_SIZE = 200
 DEFAULT_MARKDOWN_QUEUE_SIZE = 128
 DEFAULT_MAX_TASKS_PER_WORKER = 25
 DEFAULT_CHUNK_SIZE = 8192
 DEFAULT_CHUNK_OVERLAP = 128
-DEFAULT_MODEL_EMBED_BATCH_SIZE = 16
+DEFAULT_MODEL_EMBED_BATCH_SIZE = 8
 DEFAULT_CONVERT_GPU = "0,1,0"
 DEFAULT_EMBED_GPU = "1"
 
@@ -83,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--markdown-dir", type=Path, default=DEFAULT_MARKDOWN_DIR)
     parser.add_argument("--tables-dir", type=Path, default=DEFAULT_TABLES_DIR)
     parser.add_argument("--persist-dir", type=Path, default=DEFAULT_PERSIST_DIR)
+    parser.add_argument("--table-name", type=str, default=DEFAULT_TABLE_NAME)
     parser.add_argument("--convert-workers", type=int, default=DEFAULT_CONVERT_WORKERS)
     parser.add_argument("--embed-batch-size", type=int, default=DEFAULT_EMBED_BATCH_SIZE)
     parser.add_argument("--markdown-queue-size", type=int, default=DEFAULT_MARKDOWN_QUEUE_SIZE)
@@ -131,7 +133,7 @@ def safe_markdown_path(pdf_path: Path, out_dir: Path) -> Path:
 
 
 def embedded_marker_path(markdown_path: Path) -> Path:
-    return Path(str(markdown_path) + ".embedded")
+    return Path(f"{markdown_path}.embedded.{PIPELINE_VERSION}")
 
 
 def failed_marker_path(markdown_path: Path) -> Path:
@@ -274,7 +276,7 @@ def rescue_pdf_to_md_with_pymupdf(
 
 
 def convert_pdf_to_md(
-    pdf_path: Path, out_dir: Path, tables_dir: Path
+    pdf_path: Path, out_dir: Path
 ) -> tuple[bool, Path, Path | str | None]:
     md_file_path = safe_markdown_path(pdf_path, out_dir)
     failed_file = failed_marker_path(md_file_path)
@@ -290,12 +292,9 @@ def convert_pdf_to_md(
         result = converter.convert(str(pdf_path))
         body = result.document.export_to_markdown()
         metadata = build_document_metadata(pdf_path, md_file_path)
-        document_id = str(metadata["document_id"])
-
-        rewritten_body, _ = extract_tables(body, document_id, tables_dir)
 
         with open(md_file_path, "w", encoding="utf-8") as f:
-            f.write(render_markdown_document(metadata, rewritten_body))
+            f.write(render_markdown_document(metadata, body))
 
         return True, pdf_path, md_file_path
     except Exception as docling_exc:
@@ -401,6 +400,7 @@ def flush_embedding_batch(
     writer: LanceDBChunkWriter,
     document_class,
     embedding_model_name: str,
+    tables_dir: Path,
 ) -> None:
     if not batch:
         return
@@ -417,7 +417,9 @@ def flush_embedding_batch(
                 raw_text = f.read()
             metadata, body = parse_markdown_document(raw_text)
             metadata["markdown_path"] = str(md_path)
-            documents.append(document_class(text=body, metadata=metadata))
+            document_id = str(metadata["document_id"])
+            rewritten_body, _ = extract_tables(body, document_id, tables_dir)
+            documents.append(document_class(text=rewritten_body, metadata=metadata))
             embedded_paths.append(md_path)
         except Exception as exc:
             print(f"Error reading {md_path}: {exc}", flush=True)
@@ -447,6 +449,8 @@ def flush_embedding_batch(
 def embedding_worker(
     markdown_queue: mp.Queue,
     persist_dir: Path,
+    table_name: str,
+    tables_dir: Path,
     embed_batch_size: int,
     chunk_size: int,
     chunk_overlap: int,
@@ -477,13 +481,16 @@ def embedding_worker(
         },
     )
     chunker = make_chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    writer = LanceDBChunkWriter(persist_dir)
+    writer = LanceDBChunkWriter(persist_dir, table_name=table_name)
 
     batch: list[Path] = []
     started = time.time()
 
     def _flush() -> None:
-        flush_embedding_batch(batch, chunker, embed_model, writer, Document, embedding_model_name)
+        flush_embedding_batch(
+            batch, chunker, embed_model, writer, Document,
+            embedding_model_name, tables_dir,
+        )
         batch.clear()
 
     while True:
@@ -507,7 +514,6 @@ def embedding_worker(
 def run_conversion_pool(
     pdf_files: list[Path],
     md_out_dir: Path,
-    tables_dir: Path,
     markdown_queue: mp.Queue,
     embed_process: mp.Process,
     convert_workers: int,
@@ -529,7 +535,7 @@ def run_conversion_pool(
         def _refill() -> None:
             nonlocal submitted
             while submitted < len(pdf_files) and len(pending) < max_pending:
-                pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir, tables_dir))
+                pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir))
                 submitted += 1
 
         _refill()
@@ -581,6 +587,8 @@ def main() -> None:
         args=(
             markdown_queue,
             args.persist_dir,
+            args.table_name,
+            args.tables_dir,
             args.embed_batch_size,
             args.chunk_size,
             args.chunk_overlap,
@@ -596,7 +604,6 @@ def main() -> None:
         run_conversion_pool(
             pdf_files,
             args.markdown_dir,
-            args.tables_dir,
             markdown_queue,
             embed_process,
             args.convert_workers,
