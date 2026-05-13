@@ -261,6 +261,20 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
         nodes = chunker.run(documents=[doc])
         self.assertEqual(len(nodes), 1)
 
+    def _stub_converter(self, module, markdown_body: str):
+        class FakeDoc:
+            def export_to_markdown(self_inner):
+                return markdown_body
+
+        class FakeResult:
+            document = FakeDoc()
+
+        class Converter:
+            def convert(self_inner, _):
+                return FakeResult()
+
+        return Converter()
+
     def test_convert_pdf_to_md_does_not_pretouch_failed_marker(self):
         """If a worker is OOM-killed mid-convert (no exception path runs)
         the .failed marker must not have been written ahead of time."""
@@ -271,6 +285,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             pdf_path.write_bytes(b"%PDF-1.4 not really a pdf")
             out_dir = Path(tmp_dir) / "md"
             out_dir.mkdir()
+            tables_dir = Path(tmp_dir) / "tables"
 
             md_path = module.safe_markdown_path(pdf_path, out_dir)
             failed_marker = module.failed_marker_path(md_path)
@@ -289,7 +304,7 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
                 lambda *_a, **_k: (False, pdf_path, "stubbed rescue failure")
             )
             try:
-                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir)
+                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir, tables_dir)
             finally:
                 module.get_converter = original_converter
                 module.rescue_pdf_to_md_with_pymupdf = original_rescue
@@ -312,26 +327,15 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
             pdf_path.write_bytes(b"%PDF-1.4 not really a pdf")
             out_dir = Path(tmp_dir) / "md"
             out_dir.mkdir()
+            tables_dir = Path(tmp_dir) / "tables"
 
             md_path = module.safe_markdown_path(pdf_path, out_dir)
             failed_marker = module.failed_marker_path(md_path)
 
-            class FakeDoc:
-                @staticmethod
-                def export_to_markdown():
-                    return "body content"
-
-            class FakeResult:
-                document = FakeDoc()
-
-            class Converter:
-                def convert(self, _):
-                    return FakeResult()
-
             original = module.get_converter
-            module.get_converter = lambda: Converter()
+            module.get_converter = lambda: self._stub_converter(module, "body content")
             try:
-                ok, _, result = module.convert_pdf_to_md(pdf_path, out_dir)
+                ok, _, _ = module.convert_pdf_to_md(pdf_path, out_dir, tables_dir)
             finally:
                 module.get_converter = original
 
@@ -340,6 +344,41 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
                 failed_marker.exists(),
                 "successful conversion must not leave a .failed marker",
             )
+
+    def test_convert_pdf_to_md_extracts_tables_to_sidecar(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / "with_table.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4")
+            out_dir = Path(tmp_dir) / "md"
+            out_dir.mkdir()
+            tables_dir = Path(tmp_dir) / "tables"
+
+            body = (
+                "Prose before the table.\n\n"
+                "| col1 | col2 |\n"
+                "|------|------|\n"
+                "| foo  | bar  |\n"
+                "| baz  | qux  |\n"
+                "\nProse after.\n"
+            )
+
+            original = module.get_converter
+            module.get_converter = lambda: self._stub_converter(module, body)
+            try:
+                ok, _, md_path = module.convert_pdf_to_md(pdf_path, out_dir, tables_dir)
+            finally:
+                module.get_converter = original
+
+            self.assertTrue(ok)
+            csv_files = list(tables_dir.glob("*.csv"))
+            self.assertEqual(len(csv_files), 1)
+            rendered = md_path.read_text(encoding="utf-8")
+            self.assertNotIn("| foo  | bar  |", rendered)
+            self.assertIn("Table:", rendered)
+            self.assertIn("Prose before the table.", rendered)
+            self.assertIn("Prose after.", rendered)
 
     def test_build_chunk_records_requires_document_id(self):
         module = load_module()

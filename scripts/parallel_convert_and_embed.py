@@ -43,10 +43,12 @@ from urllib.parse import quote, unquote
 
 from fyi_lancedb_writer import LanceDBChunkWriter
 from fyi_markdown import make_chunker, parse_markdown_document, render_markdown_document
+from table_extractor import extract_tables
 
 
 DEFAULT_DATA_DIR = Path("fyi/data/request")
 DEFAULT_MARKDOWN_DIR = Path("fyi/markdown")
+DEFAULT_TABLES_DIR = Path("fyi/markdown/tables")
 DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel.lancedb")
 DEFAULT_TABLE_NAME = "chunks"
 DEFAULT_CONVERT_WORKERS = 10
@@ -79,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--markdown-dir", type=Path, default=DEFAULT_MARKDOWN_DIR)
+    parser.add_argument("--tables-dir", type=Path, default=DEFAULT_TABLES_DIR)
     parser.add_argument("--persist-dir", type=Path, default=DEFAULT_PERSIST_DIR)
     parser.add_argument("--convert-workers", type=int, default=DEFAULT_CONVERT_WORKERS)
     parser.add_argument("--embed-batch-size", type=int, default=DEFAULT_EMBED_BATCH_SIZE)
@@ -270,7 +273,9 @@ def rescue_pdf_to_md_with_pymupdf(
     return True, pdf_path, md_file_path
 
 
-def convert_pdf_to_md(pdf_path: Path, out_dir: Path) -> tuple[bool, Path, Path | str | None]:
+def convert_pdf_to_md(
+    pdf_path: Path, out_dir: Path, tables_dir: Path
+) -> tuple[bool, Path, Path | str | None]:
     md_file_path = safe_markdown_path(pdf_path, out_dir)
     failed_file = failed_marker_path(md_file_path)
 
@@ -285,9 +290,12 @@ def convert_pdf_to_md(pdf_path: Path, out_dir: Path) -> tuple[bool, Path, Path |
         result = converter.convert(str(pdf_path))
         body = result.document.export_to_markdown()
         metadata = build_document_metadata(pdf_path, md_file_path)
+        document_id = str(metadata["document_id"])
+
+        rewritten_body, _ = extract_tables(body, document_id, tables_dir)
 
         with open(md_file_path, "w", encoding="utf-8") as f:
-            f.write(render_markdown_document(metadata, body))
+            f.write(render_markdown_document(metadata, rewritten_body))
 
         return True, pdf_path, md_file_path
     except Exception as docling_exc:
@@ -499,6 +507,7 @@ def embedding_worker(
 def run_conversion_pool(
     pdf_files: list[Path],
     md_out_dir: Path,
+    tables_dir: Path,
     markdown_queue: mp.Queue,
     embed_process: mp.Process,
     convert_workers: int,
@@ -520,7 +529,7 @@ def run_conversion_pool(
         def _refill() -> None:
             nonlocal submitted
             while submitted < len(pdf_files) and len(pending) < max_pending:
-                pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir))
+                pending.add(executor.submit(convert_pdf_to_md, pdf_files[submitted], md_out_dir, tables_dir))
                 submitted += 1
 
         _refill()
@@ -559,6 +568,7 @@ def main() -> None:
     mp.set_start_method("spawn", force=True)
 
     args.markdown_dir.mkdir(parents=True, exist_ok=True)
+    args.tables_dir.mkdir(parents=True, exist_ok=True)
     args.persist_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Finding PDF files in {args.data_dir}...", flush=True)
@@ -586,6 +596,7 @@ def main() -> None:
         run_conversion_pool(
             pdf_files,
             args.markdown_dir,
+            args.tables_dir,
             markdown_queue,
             embed_process,
             args.convert_workers,
