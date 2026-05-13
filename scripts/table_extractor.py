@@ -122,13 +122,54 @@ def _read_pipe_csv(lines: list[str]) -> pd.DataFrame:
     return df
 
 
+def _column_emptiness(region: TableRegion) -> list[float]:
+    totals: list[int] = []
+    empties: list[int] = []
+    for line in region.lines:
+        if SEPARATOR_ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        if len(cells) > len(totals):
+            totals.extend([0] * (len(cells) - len(totals)))
+            empties.extend([0] * (len(cells) - len(empties)))
+        for i, cell in enumerate(cells):
+            totals[i] += 1
+            if not cell:
+                empties[i] += 1
+    return [(empties[i] / totals[i]) if totals[i] else 0.0 for i in range(len(totals))]
+
+
+def _drop_indices(region: TableRegion, drop: set[int]) -> list[str]:
+    out: list[str] = []
+    for line in region.lines:
+        if SEPARATOR_ROW_RE.match(line):
+            continue
+        cells = _row_cells(line)
+        kept = [c for i, c in enumerate(cells) if i not in drop]
+        out.append("|".join(kept))
+    return out
+
+
+def _reconcile_region_lines(region: TableRegion, target_cols: int) -> list[str]:
+    if region.column_count <= target_cols:
+        return _drop_indices(region, set())
+    emptiness = _column_emptiness(region)
+    excess = region.column_count - target_cols
+    # Drop the `excess` columns with highest emptiness, preferring inner cols
+    # (header/last data cols are load-bearing; spacers are interior).
+    ranked = sorted(
+        range(len(emptiness)),
+        key=lambda i: (-emptiness[i], 0 if 0 < i < len(emptiness) - 1 else 1, i),
+    )
+    drop = set(ranked[:excess])
+    return _drop_indices(region, drop)
+
+
 def _clean_body_lines(regions: list[TableRegion]) -> list[str]:
+    target_cols = min(r.column_count for r in regions)
     out: list[str] = []
     for region in regions:
-        for line in region.lines:
-            if SEPARATOR_ROW_RE.match(line):
-                continue
-            out.append(line.strip().strip("|"))
+        out.extend(_reconcile_region_lines(region, target_cols))
     return out
 
 

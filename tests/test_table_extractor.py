@@ -119,6 +119,18 @@ class ParseLogicalTableTests(unittest.TestCase):
         self.assertIn("MOTU3611", roster.iloc[:, 0].tolist())
         self.assertIn("RICH337", roster.iloc[:, 0].tolist())
 
+    def test_column_shift_table_reconciles_to_uniform_schema(self):
+        body = read_fixture("07_multiblock_column_shift.md")
+        logical = table_extractor.group_into_logical_tables(
+            table_extractor.detect_table_regions(body)
+        )[0]
+        df = table_extractor.parse_logical_table(logical)
+        # Phantom empty spacer column collapsed: 5-col + 4-col → 4 cols
+        self.assertEqual(df.shape[1], 4)
+        org_col = df.iloc[:, -1].dropna().astype(str).tolist()
+        self.assertTrue(any("3JRS CONSTRUCTION LIMITED" in v for v in org_col))
+        self.assertTrue(any("AGVANCE LIMITED" in v for v in org_col))
+
 
 if __name__ == "__main__":
     unittest.main()
