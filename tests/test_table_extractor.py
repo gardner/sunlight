@@ -30,6 +30,15 @@ class DetectTableRegionsTests(unittest.TestCase):
         regions = table_extractor.detect_table_regions(body)
         self.assertEqual(regions, [])
 
+    def test_region_exposes_line_indices_and_lines(self):
+        body = read_fixture("01_tiny_clean.md")
+        regions = table_extractor.detect_table_regions(body)
+        region = regions[0]
+        lines = body.splitlines()
+        self.assertEqual(region.lines, lines[region.line_start : region.line_end])
+        self.assertTrue(all("|" in ln for ln in region.lines))
+        self.assertEqual(len(region.lines), 5)
+
 
 if __name__ == "__main__":
     unittest.main()
