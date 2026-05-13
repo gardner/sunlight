@@ -88,6 +88,15 @@ class GroupLogicalTablesTests(unittest.TestCase):
         column_counts = [lt.column_count for lt in logical]
         self.assertEqual(column_counts, [6, 5, 3])
 
+    def test_adjacent_blocks_with_one_column_shift_merge(self):
+        body = read_fixture("07_multiblock_column_shift.md")
+        regions = table_extractor.detect_table_regions(body)
+        self.assertEqual(len(regions), 2)
+        self.assertEqual([r.column_count for r in regions], [5, 4])
+        logical = table_extractor.group_into_logical_tables(regions)
+        self.assertEqual(len(logical), 1)
+        self.assertEqual(logical[0].regions, regions)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -59,18 +59,49 @@ def detect_table_regions(markdown_body: str) -> list[TableRegion]:
     return regions
 
 
+def _row_cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def _data_cells(regions: list[TableRegion]) -> set[str]:
+    values: set[str] = set()
+    for region in regions:
+        for line in region.lines:
+            if SEPARATOR_ROW_RE.match(line):
+                continue
+            for cell in _row_cells(line):
+                if cell:
+                    values.add(cell)
+    return values
+
+
+def _is_continuation(region: TableRegion, prior_cells: set[str]) -> bool:
+    for line in region.lines:
+        if SEPARATOR_ROW_RE.match(line):
+            continue
+        cells = [c for c in _row_cells(line) if c]
+        if not cells:
+            return False
+        matches = sum(1 for c in cells if c in prior_cells)
+        return matches / len(cells) >= 0.5
+    return False
+
+
 def group_into_logical_tables(regions: list[TableRegion]) -> list[LogicalTable]:
     grouped: list[LogicalTable] = []
     current: list[TableRegion] = []
-    current_cols: int | None = None
     for region in regions:
-        if current_cols is None or region.column_count == current_cols:
+        if not current:
             current.append(region)
-            current_cols = region.column_count
+            continue
+        if region.column_count == current[-1].column_count:
+            current.append(region)
+            continue
+        if _is_continuation(region, _data_cells(current)):
+            current.append(region)
             continue
         grouped.append(LogicalTable(regions=list(current)))
         current = [region]
-        current_cols = region.column_count
     if current:
         grouped.append(LogicalTable(regions=list(current)))
     return grouped
