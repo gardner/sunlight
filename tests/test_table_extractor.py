@@ -132,6 +132,17 @@ class ParseLogicalTableTests(unittest.TestCase):
         self.assertTrue(any("AGVANCE LIMITED" in v for v in org_col))
 
 
+class DetectFooterPhraseTests(unittest.TestCase):
+    def test_finds_official_information_act_footer(self):
+        body = read_fixture("07_multiblock_column_shift.md")
+        phrase = table_extractor.detect_footer_phrase(body)
+        self.assertEqual(phrase, "Released under the Official Information Act 1982")
+
+    def test_returns_none_when_no_footer_present(self):
+        body = read_fixture("06_pure_prose.md")
+        self.assertIsNone(table_extractor.detect_footer_phrase(body))
+
+
 class CleanFooterLeakTests(unittest.TestCase):
     def _df(self, values):
         import pandas as pd

@@ -8,6 +8,16 @@ import pandas as pd
 
 PIPE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 SEPARATOR_ROW_RE = re.compile(r"^\s*\|[\s:\-|]+\|\s*$")
+FOOTER_RE = re.compile(
+    r"Released under (?:the )?"
+    r"(?:Official Information|"
+    r"Local Government Official Information and Meetings) Act \d{4}"
+)
+
+
+def detect_footer_phrase(markdown_body: str) -> str | None:
+    match = FOOTER_RE.search(markdown_body)
+    return match.group(0) if match else None
 
 
 @dataclass(frozen=True)
