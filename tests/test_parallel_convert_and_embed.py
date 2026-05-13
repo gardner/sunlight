@@ -175,8 +175,9 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
 
         args = module.build_parser().parse_args([])
 
-        self.assertEqual(args.chunk_size, 1024)
-        self.assertEqual(args.model_embed_batch_size, 64)
+        self.assertEqual(args.chunk_size, 8192)
+        self.assertEqual(args.chunk_overlap, 128)
+        self.assertEqual(args.model_embed_batch_size, 16)
 
     def test_default_data_dirs_resolve_through_repo_symlink(self):
         module = load_module()
@@ -230,6 +231,35 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
                 os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             else:
                 os.environ["CUDA_VISIBLE_DEVICES"] = original
+
+    def test_make_chunker_splits_oversized_unstructured_text(self):
+        module = load_module()
+        from llama_index.core import Document
+
+        chunker = module.make_chunker(chunk_size=128, chunk_overlap=16)
+        # A long body with no markdown headers — MarkdownNodeParser alone
+        # would emit a single oversized node.
+        body = ("alpha beta gamma delta " * 2000).strip()
+        doc = Document(text=body, metadata={"document_id": "doc_test"})
+
+        nodes = chunker.run(documents=[doc])
+
+        self.assertGreater(len(nodes), 1)
+        for node in nodes:
+            self.assertLess(len(module.node_text(node)), 4000)
+
+    def test_make_chunker_preserves_short_documents_as_few_nodes(self):
+        module = load_module()
+        from llama_index.core import Document
+
+        chunker = module.make_chunker(chunk_size=512, chunk_overlap=32)
+        doc = Document(
+            text="# Heading\n\nshort body text.",
+            metadata={"document_id": "doc_short"},
+        )
+
+        nodes = chunker.run(documents=[doc])
+        self.assertEqual(len(nodes), 1)
 
     def test_convert_pdf_to_md_does_not_pretouch_failed_marker(self):
         """If a worker is OOM-killed mid-convert (no exception path runs)

@@ -42,6 +42,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from fyi_lancedb_writer import LanceDBChunkWriter
+from fyi_markdown import make_chunker, parse_markdown_document, render_markdown_document
 
 
 DEFAULT_DATA_DIR = Path("fyi/data/request")
@@ -52,8 +53,9 @@ DEFAULT_CONVERT_WORKERS = 10
 DEFAULT_EMBED_BATCH_SIZE = 200
 DEFAULT_MARKDOWN_QUEUE_SIZE = 128
 DEFAULT_MAX_TASKS_PER_WORKER = 25
-DEFAULT_CHUNK_SIZE = 1024
-DEFAULT_MODEL_EMBED_BATCH_SIZE = 64
+DEFAULT_CHUNK_SIZE = 8192
+DEFAULT_CHUNK_OVERLAP = 128
+DEFAULT_MODEL_EMBED_BATCH_SIZE = 16
 DEFAULT_CONVERT_GPU = "0,1,0"
 DEFAULT_EMBED_GPU = "1"
 
@@ -82,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embed-batch-size", type=int, default=DEFAULT_EMBED_BATCH_SIZE)
     parser.add_argument("--markdown-queue-size", type=int, default=DEFAULT_MARKDOWN_QUEUE_SIZE)
     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
+    parser.add_argument("--chunk-overlap", type=int, default=DEFAULT_CHUNK_OVERLAP)
     parser.add_argument("--model-embed-batch-size", type=int, default=DEFAULT_MODEL_EMBED_BATCH_SIZE)
     parser.add_argument(
         "--max-tasks-per-worker",
@@ -225,42 +228,6 @@ def build_document_metadata(
         metadata["markdown_r2_key"] = markdown_r2_key
 
     return metadata
-
-
-def render_markdown_document(metadata: dict[str, object], body: str) -> str:
-    lines = ["---"]
-    for key in sorted(metadata):
-        value = metadata[key]
-        if value is None:
-            continue
-        lines.append(f"{key}: {json.dumps(value, ensure_ascii=True)}")
-    lines.extend(["---", "", body])
-    return "\n".join(lines)
-
-
-def parse_markdown_document(text: str) -> tuple[dict[str, object], str]:
-    if not text.startswith("---\n"):
-        raise ValueError("Markdown is missing opening frontmatter delimiter")
-
-    end_index = text.find("\n---\n", 4)
-    if end_index == -1:
-        raise ValueError("Markdown frontmatter has no closing delimiter")
-
-    raw_metadata = text[4:end_index]
-    body = text[end_index + len("\n---\n") :]
-    if body.startswith("\n"):
-        body = body[1:]
-    metadata: dict[str, object] = {}
-
-    for line in raw_metadata.splitlines():
-        if not line.strip():
-            continue
-        key, separator, raw_value = line.partition(":")
-        if not separator:
-            raise ValueError(f"Malformed frontmatter line: {line!r}")
-        metadata[key.strip()] = json.loads(raw_value.strip())
-
-    return metadata, body
 
 
 def get_converter():
@@ -421,7 +388,7 @@ def build_chunk_records(nodes, markdown_paths: list[Path], embedding_model_name:
 
 def flush_embedding_batch(
     batch: list[Path],
-    parser,
+    chunker,
     embed_model,
     writer: LanceDBChunkWriter,
     document_class,
@@ -450,7 +417,7 @@ def flush_embedding_batch(
     if not documents:
         return
 
-    nodes = parser.get_nodes_from_documents(documents)
+    nodes = chunker.run(documents=documents)
     print(f"Embedding {len(nodes)} nodes from {len(embedded_paths)} markdown files...", flush=True)
 
     texts = [node_text(node) for node in nodes]
@@ -474,6 +441,7 @@ def embedding_worker(
     persist_dir: Path,
     embed_batch_size: int,
     chunk_size: int,
+    chunk_overlap: int,
     model_embed_batch_size: int,
     embed_gpu_index: str,
 ) -> None:
@@ -481,7 +449,6 @@ def embedding_worker(
 
     import torch
     from llama_index.core import Document
-    from llama_index.core.node_parser import MarkdownNodeParser
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
     embedding_model_name = "Qwen/Qwen3-Embedding-0.6B"
@@ -497,18 +464,18 @@ def embedding_worker(
         max_length=chunk_size,
         embed_batch_size=model_embed_batch_size,
         model_kwargs={
-            "torch_dtype": torch.float16,
+            "torch_dtype": torch.bfloat16,
             "attn_implementation": "flash_attention_2",
         },
     )
-    parser = MarkdownNodeParser()
+    chunker = make_chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     writer = LanceDBChunkWriter(persist_dir)
 
     batch: list[Path] = []
     started = time.time()
 
     def _flush() -> None:
-        flush_embedding_batch(batch, parser, embed_model, writer, Document, embedding_model_name)
+        flush_embedding_batch(batch, chunker, embed_model, writer, Document, embedding_model_name)
         batch.clear()
 
     while True:
@@ -606,6 +573,7 @@ def main() -> None:
             args.persist_dir,
             args.embed_batch_size,
             args.chunk_size,
+            args.chunk_overlap,
             args.model_embed_batch_size,
             args.embed_gpu,
         ),
