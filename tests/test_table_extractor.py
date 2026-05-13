@@ -1,0 +1,25 @@
+import sys
+import unittest
+from pathlib import Path
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "markdown_tables"
+
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+import table_extractor  # noqa: E402
+
+
+def read_fixture(name: str) -> str:
+    return (FIXTURE_DIR / name).read_text(encoding="utf-8")
+
+
+class DetectTableRegionsTests(unittest.TestCase):
+    def test_tiny_clean_table_yields_single_region(self):
+        body = read_fixture("01_tiny_clean.md")
+        regions = table_extractor.detect_table_regions(body)
+        self.assertEqual(len(regions), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
