@@ -87,21 +87,23 @@ def _is_continuation(region: TableRegion, prior_cells: set[str]) -> bool:
     return False
 
 
+def _belongs_with(region: TableRegion, current: list[TableRegion]) -> bool:
+    if not current:
+        return True
+    if region.column_count == current[-1].column_count:
+        return True
+    return _is_continuation(region, _data_cells(current))
+
+
 def group_into_logical_tables(regions: list[TableRegion]) -> list[LogicalTable]:
     grouped: list[LogicalTable] = []
     current: list[TableRegion] = []
     for region in regions:
-        if not current:
+        if _belongs_with(region, current):
             current.append(region)
-            continue
-        if region.column_count == current[-1].column_count:
-            current.append(region)
-            continue
-        if _is_continuation(region, _data_cells(current)):
-            current.append(region)
-            continue
-        grouped.append(LogicalTable(regions=list(current)))
-        current = [region]
+        else:
+            grouped.append(LogicalTable(regions=list(current)))
+            current = [region]
     if current:
         grouped.append(LogicalTable(regions=list(current)))
     return grouped
