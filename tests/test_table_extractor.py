@@ -98,5 +98,27 @@ class GroupLogicalTablesTests(unittest.TestCase):
         self.assertEqual(logical[0].regions, regions)
 
 
+class ParseLogicalTableTests(unittest.TestCase):
+    def test_single_region_logical_table_matches_parse_region(self):
+        body = read_fixture("01_tiny_clean.md")
+        regions = table_extractor.detect_table_regions(body)
+        logical = table_extractor.group_into_logical_tables(regions)[0]
+        self.assertEqual(
+            table_extractor.parse_logical_table(logical).shape,
+            table_extractor.parse_region(regions[0]).shape,
+        )
+
+    def test_multiblock_same_schema_concatenates_rows(self):
+        body = read_fixture("08_multiblock_different_schemas.md")
+        logical = table_extractor.group_into_logical_tables(
+            table_extractor.detect_table_regions(body)
+        )
+        roster = table_extractor.parse_logical_table(logical[0])
+        self.assertEqual(roster.shape[1], 6)
+        self.assertGreaterEqual(roster.shape[0], 25)
+        self.assertIn("MOTU3611", roster.iloc[:, 0].tolist())
+        self.assertIn("RICH337", roster.iloc[:, 0].tolist())
+
+
 if __name__ == "__main__":
     unittest.main()

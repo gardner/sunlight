@@ -109,14 +109,9 @@ def group_into_logical_tables(regions: list[TableRegion]) -> list[LogicalTable]:
     return grouped
 
 
-def parse_region(region: TableRegion) -> pd.DataFrame:
-    body_lines = [
-        ln.strip().strip("|")
-        for ln in region.lines
-        if not SEPARATOR_ROW_RE.match(ln)
-    ]
+def _read_pipe_csv(lines: list[str]) -> pd.DataFrame:
     df = pd.read_csv(
-        io.StringIO("\n".join(body_lines)),
+        io.StringIO("\n".join(lines)),
         sep=r"\s*\|\s*",
         engine="python",
         skipinitialspace=True,
@@ -125,3 +120,21 @@ def parse_region(region: TableRegion) -> pd.DataFrame:
     )
     df.columns = [str(c).strip() for c in df.columns]
     return df
+
+
+def _clean_body_lines(regions: list[TableRegion]) -> list[str]:
+    out: list[str] = []
+    for region in regions:
+        for line in region.lines:
+            if SEPARATOR_ROW_RE.match(line):
+                continue
+            out.append(line.strip().strip("|"))
+    return out
+
+
+def parse_region(region: TableRegion) -> pd.DataFrame:
+    return _read_pipe_csv(_clean_body_lines([region]))
+
+
+def parse_logical_table(table: LogicalTable) -> pd.DataFrame:
+    return _read_pipe_csv(_clean_body_lines(table.regions))
