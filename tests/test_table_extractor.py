@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -212,6 +213,61 @@ class CleanFooterLeakTests(unittest.TestCase):
         df = self._df(["4U WOODFLOORING LIMITED Act"])
         out = table_extractor.clean_footer_leak(df, None)
         self.assertEqual(out["col"].tolist(), ["4U WOODFLOORING LIMITED Act"])
+
+
+class ExtractTablesTests(unittest.TestCase):
+    def test_single_table_writes_csv_and_rewrites_body(self):
+        body = read_fixture("02_small_clean.md")
+        with tempfile.TemporaryDirectory() as td:
+            rewritten, extracted = table_extractor.extract_tables(
+                body, document_id="doc_test_02", out_dir=Path(td)
+            )
+            self.assertEqual(len(extracted), 1)
+            et = extracted[0]
+            self.assertTrue(et.csv_path.exists())
+            csv_text = et.csv_path.read_text(encoding="utf-8")
+            self.assertIn("South Side", csv_text)
+            self.assertIn("Structural Upgrade", csv_text)
+            # Rewritten body keeps the document_id frontmatter and drops pipe rows
+            self.assertIn("doc_fyi_15104_57812_4_9d52c5569dd6", rewritten)
+            self.assertNotIn("| Structural Upgrade |", rewritten)
+            self.assertIn("Table:", rewritten)
+
+    def test_no_tables_returns_body_unchanged(self):
+        body = read_fixture("06_pure_prose.md")
+        with tempfile.TemporaryDirectory() as td:
+            rewritten, extracted = table_extractor.extract_tables(
+                body, document_id="doc_test_06", out_dir=Path(td)
+            )
+            self.assertEqual(extracted, [])
+            self.assertEqual(rewritten, body)
+
+    def test_multiple_logical_tables_each_get_a_csv(self):
+        body = read_fixture("08_multiblock_different_schemas.md")
+        with tempfile.TemporaryDirectory() as td:
+            _, extracted = table_extractor.extract_tables(
+                body, document_id="doc_test_08", out_dir=Path(td)
+            )
+            self.assertEqual(len(extracted), 3)
+            paths = {et.csv_path for et in extracted}
+            self.assertEqual(len(paths), 3)
+            for et in extracted:
+                self.assertTrue(et.csv_path.exists())
+
+    def test_footer_cleanup_is_applied(self):
+        body = read_fixture("07_multiblock_column_shift.md")
+        with tempfile.TemporaryDirectory() as td:
+            _, extracted = table_extractor.extract_tables(
+                body, document_id="doc_test_07", out_dir=Path(td)
+            )
+            import pandas as pd
+
+            df = pd.read_csv(extracted[0].csv_path, dtype=str, keep_default_na=False)
+            org = df.iloc[:, -1].tolist()
+            for name in org:
+                self.assertFalse(name.endswith(" 1982"), name)
+                self.assertFalse(name.endswith(" Act"), name)
+                self.assertFalse(name.endswith(" Information"), name)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
@@ -228,3 +229,60 @@ def clean_footer_leak(df: pd.DataFrame, footer_phrase: str | None) -> pd.DataFra
             lambda v: _strip_footer_tokens(v, vocab)
         )
     return cleaned
+
+
+@dataclass(frozen=True)
+class ExtractedTable:
+    document_id: str
+    table_index: int
+    csv_path: Path
+    shape: tuple[int, int]
+    summary: str
+    footer_phrase: str | None
+
+
+def _summary_block(index: int, csv_name: str, summary: str) -> list[str]:
+    return [
+        "<!-- table extracted -->",
+        f"[Table {index}] CSV: {csv_name}",
+        *summary.splitlines(),
+    ]
+
+
+def extract_tables(
+    markdown_body: str,
+    document_id: str,
+    out_dir: Path,
+) -> tuple[str, list[ExtractedTable]]:
+    regions = detect_table_regions(markdown_body)
+    if not regions:
+        return markdown_body, []
+    logicals = group_into_logical_tables(regions)
+    footer_phrase = detect_footer_phrase(markdown_body)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    lines = markdown_body.splitlines()
+
+    extracted: list[ExtractedTable] = []
+    replacements: list[tuple[int, int, list[str]]] = []
+    for idx, lt in enumerate(logicals):
+        df = clean_footer_leak(parse_logical_table(lt), footer_phrase)
+        csv_path = out_dir / f"{document_id}_table_{idx:02d}.csv"
+        df.to_csv(csv_path, index=False)
+        summary = summarize_table(df)
+        replacements.append(
+            (lt.regions[0].line_start, lt.regions[-1].line_end,
+             _summary_block(idx, csv_path.name, summary))
+        )
+        extracted.append(
+            ExtractedTable(
+                document_id=document_id,
+                table_index=idx,
+                csv_path=csv_path,
+                shape=df.shape,
+                summary=summary,
+                footer_phrase=footer_phrase,
+            )
+        )
+    for start, end, block in reversed(replacements):
+        lines[start:end] = block
+    return "\n".join(lines), extracted
