@@ -20,6 +20,16 @@ class DetectTableRegionsTests(unittest.TestCase):
         regions = table_extractor.detect_table_regions(body)
         self.assertEqual(len(regions), 1)
 
+    def test_pure_prose_yields_no_regions(self):
+        body = read_fixture("06_pure_prose.md")
+        regions = table_extractor.detect_table_regions(body)
+        self.assertEqual(regions, [])
+
+    def test_scattered_pipes_without_blocks_yield_no_regions(self):
+        body = read_fixture("05_pipes_no_table.md")
+        regions = table_extractor.detect_table_regions(body)
+        self.assertEqual(regions, [])
+
 
 if __name__ == "__main__":
     unittest.main()
