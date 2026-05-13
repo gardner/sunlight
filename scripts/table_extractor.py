@@ -205,6 +205,17 @@ def _strip_footer_tokens(cell: str, footer_vocab: set[str]) -> str:
     return " ".join(tokens)
 
 
+def summarize_table(df: pd.DataFrame, max_sample_rows: int = 3) -> str:
+    rows, cols = df.shape
+    header = f"Table: {rows} rows x {cols} columns"
+    columns_line = "Columns: " + ", ".join(str(c) for c in df.columns)
+    sample = df.head(max_sample_rows)
+    sample_lines = [
+        "- " + " | ".join(str(v) for v in row) for row in sample.itertuples(index=False)
+    ]
+    return "\n".join([header, columns_line, "Sample rows:", *sample_lines])
+
+
 def clean_footer_leak(df: pd.DataFrame, footer_phrase: str | None) -> pd.DataFrame:
     if not footer_phrase:
         return df

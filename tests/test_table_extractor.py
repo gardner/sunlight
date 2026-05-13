@@ -132,6 +132,36 @@ class ParseLogicalTableTests(unittest.TestCase):
         self.assertTrue(any("AGVANCE LIMITED" in v for v in org_col))
 
 
+class SummarizeTableTests(unittest.TestCase):
+    def test_summary_states_shape(self):
+        body = read_fixture("02_small_clean.md")
+        df = table_extractor.parse_region(
+            table_extractor.detect_table_regions(body)[0]
+        )
+        summary = table_extractor.summarize_table(df)
+        self.assertIn("6 rows", summary)
+        self.assertIn("3 columns", summary)
+
+    def test_summary_lists_column_headers(self):
+        body = read_fixture("02_small_clean.md")
+        df = table_extractor.parse_region(
+            table_extractor.detect_table_regions(body)[0]
+        )
+        summary = table_extractor.summarize_table(df)
+        self.assertIn("South Side", summary)
+        self.assertIn("North Side", summary)
+
+    def test_summary_includes_sample_rows(self):
+        body = read_fixture("02_small_clean.md")
+        df = table_extractor.parse_region(
+            table_extractor.detect_table_regions(body)[0]
+        )
+        summary = table_extractor.summarize_table(df, max_sample_rows=2)
+        self.assertIn("Structural Upgrade", summary)
+        self.assertIn("Fitout", summary)
+        self.assertNotIn("Grand Total", summary)
+
+
 class DetectFooterPhraseTests(unittest.TestCase):
     def test_finds_official_information_act_footer(self):
         body = read_fixture("07_multiblock_column_shift.md")
