@@ -1,0 +1,14 @@
+{
+  "id": 77777,
+  "url_title": "flags-only-body",
+  "title": "Request to a body with only flag tags",
+  "created_at": "2020-01-01T00:00:00+13:00",
+  "described_state": "refused",
+  "law_used": "lgoima",
+  "public_body": {
+    "id": 999,
+    "url_name": "obscure_body",
+    "name": "Obscure Body",
+    "tags": [["popular_agency", null], ["not_apply", null]]
+  }
+}

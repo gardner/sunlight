@@ -1,0 +1,15 @@
+{
+  "id": 29087,
+  "url_title": "auckland-council-owned-leisure-centres",
+  "title": "Auckland Council Owned Leisure Centres",
+  "created_at": "2024-11-06T16:36:43+13:00",
+  "described_state": "partially_successful",
+  "law_used": "foi",
+  "tags": [],
+  "public_body": {
+    "id": 303,
+    "url_name": "auckland_council",
+    "name": "Auckland Council",
+    "tags": [["popular_agency", null], ["city_council", null]]
+  }
+}
