@@ -12,5 +12,16 @@
       "pattern": "www.sunlight.nz",
       "custom_domain": true
     }
+  ],
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
+  "vectorize": [
+    {
+      "binding": "FYI_VECTORS",
+      "index_name": "fyi-v2",
+      "remote": true
+    }
   ]
 }

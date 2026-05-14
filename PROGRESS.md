@@ -173,6 +173,15 @@ Completed:
 * Smoke-tested the LanceDB pipeline against real FYI PDFs, then fixed the missing direct HuggingFace embedding dependency and a LanceDB table-list compatibility bug in the Vectorize exporter that the test exposed.
 * Started the full FYI corpus run in a PTY and confirmed LanceDB streaming flushes work, then stopped it after the embedding worker retained an 86 GiB unified-memory allocation on a long batch.
 * Bounded embedding memory by switching to fixed-size sentence chunks, setting an explicit small HuggingFace embedding batch size, and clearing CUDA cache after each persisted embedding flush.
+* Added the public `/search` page to the `sunlight.nz` landing app.
+* Added `/api/search` to the landing Worker, using Workers AI for query
+  embeddings and answer generation against the populated `fyi-v2` Vectorize
+  index.
+* Added test coverage for landing search input validation, Workers AI embedding
+  parsing, Vectorize metadata normalization, prompt construction, and answer
+  extraction.
+* Bound the landing Worker to Workers AI and `fyi-v2`, with remote bindings
+  enabled for local `wrangler dev` checks.
 
 ## Verification
 
@@ -203,6 +212,10 @@ pnpm exec tsc --noEmit
 pnpm admin:build
 pnpm authority:build
 pnpm landing:build
+pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
+pnpm dlx wrangler@latest dev apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc --ip 0.0.0.0 --port 8787
+curl -s http://127.0.0.1:8787/search | rg -o "Search Sunlight|Search the disclosure archive|/api/search"
+curl -s -X POST http://127.0.0.1:8787/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?","topK":3}'
 pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
 pnpm dlx wrangler@latest deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --config apps/admin/wrangler.jsonc
 pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --dry-run --config apps/authority/wrangler.jsonc
@@ -249,12 +262,16 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Add an R2 upload command for `sunlight-corpus` that uploads only canonical PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local metadata.
-2. Run the full FYI ingestion again against the bounded-chunk LanceDB pipeline and watch Docling worker RSS, embedding GPU memory, and LanceDB growth to confirm memory stays flat over a long run.
-3. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and run the first eval set against both pipelines.
-4. Run the streaming LanceDB-to-Vectorize export, then upload main-pipeline vectors with `source_url`, `request_url`, and `markdown_r2_key` metadata.
-5. Grant "Vectorize: Edit" permissions to the `.env` Cloudflare API Token.
-6. Do a controlled live Cloudflare Email Sending test before sending to real
+1. Deploy the updated landing Worker to `sunlight.nz` and verify
+   `/search` plus a live `/api/search` request at the custom domain.
+2. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+   PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
+   metadata.
+3. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+   run the first eval set against both pipelines.
+4. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+   so answers can use full chunks instead of Vectorize `text_preview` metadata.
+5. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-7. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+6. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.

@@ -55,6 +55,7 @@ export default function LandingPage() {
         </a>
         <nav className="nav-links" aria-label="Primary navigation">
           <a href="#about">How it works</a>
+          <a href="/search">Search</a>
           <a href="#authorities">For authorities</a>
           <a href="#method">Method</a>
           <a href="#contact">Contact</a>
@@ -75,6 +76,9 @@ export default function LandingPage() {
             Sunlight is an independent project. It is not a government service. Material sent to Sunlight is preserved for review and will be searchable in the future.
           </p>
           <div className="hero-actions" aria-label="Landing page actions">
+            <a className="button button-primary" href="/search">
+              Search the archive
+            </a>
             <a className="button button-primary" href="#about">
               Learn how it works
             </a>
