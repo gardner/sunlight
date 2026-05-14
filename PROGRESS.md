@@ -182,6 +182,8 @@ Completed:
   extraction.
 * Bound the landing Worker to Workers AI and `fyi-v2`, with remote bindings
   enabled for local `wrangler dev` checks.
+* Deployed the search-enabled landing Worker to `sunlight.nz` and verified the
+  live `/search` page plus `/api/search` answer path.
 
 ## Verification
 
@@ -216,6 +218,10 @@ pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets a
 pnpm dlx wrangler@latest dev apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc --ip 0.0.0.0 --port 8787
 curl -s http://127.0.0.1:8787/search | rg -o "Search Sunlight|Search the disclosure archive|/api/search"
 curl -s -X POST http://127.0.0.1:8787/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?","topK":3}'
+pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
+curl -I https://sunlight.nz/search
+curl -s https://sunlight.nz/search | rg -o "Search Sunlight|Search the disclosure archive"
+curl -s -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?","topK":1}'
 pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
 pnpm dlx wrangler@latest deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --config apps/admin/wrangler.jsonc
 pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --dry-run --config apps/authority/wrangler.jsonc
@@ -262,16 +268,14 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Deploy the updated landing Worker to `sunlight.nz` and verify
-   `/search` plus a live `/api/search` request at the custom domain.
-2. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+1. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-3. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+2. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-4. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+3. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-5. Do a controlled live Cloudflare Email Sending test before sending to real
+4. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-6. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+5. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
