@@ -10,16 +10,32 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import lancedb
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fyi_request_metadata
+
 
 DEFAULT_PERSIST_DIR = Path("./storage/fyi_parallel.lancedb")
-DEFAULT_TABLE_NAME = "chunks"
+DEFAULT_TABLE_NAME = "chunks_v2"
 DEFAULT_OUTPUT_DIR = Path("./storage/vectorize_export")
+DEFAULT_FYI_DATA_DIR = Path("./fyi/data")
 DEFAULT_ROWS_PER_FILE = 5000
 DEFAULT_BATCH_SIZE = 1024
+
+REQUEST_METADATA_KEYS = (
+    "authority_slug",
+    "authority_name",
+    "authority_category",
+    "described_state",
+    "request_year",
+    "request_title",
+    "url_title",
+    "request_created_at",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,12 +48,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--persist-dir", type=Path, default=DEFAULT_PERSIST_DIR)
     parser.add_argument("--table-name", default=DEFAULT_TABLE_NAME)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--fyi-data-dir", type=Path, default=DEFAULT_FYI_DATA_DIR)
     parser.add_argument("--rows-per-file", type=int, default=DEFAULT_ROWS_PER_FILE)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     return parser
 
 
-def clean_metadata(row: dict[str, object]) -> dict[str, object]:
+def clean_metadata(
+    row: dict[str, object],
+    request_index: dict[int, dict],
+) -> dict[str, object]:
     metadata: dict[str, object] = {}
     for key in (
         "document_id",
@@ -62,6 +82,17 @@ def clean_metadata(row: dict[str, object]) -> dict[str, object]:
             metadata[key] = value
         else:
             metadata[key] = str(value)
+    request_id = row.get("fyi_request_id")
+    if request_id is not None:
+        try:
+            entry = request_index.get(int(request_id))
+        except (TypeError, ValueError):
+            entry = None
+        if entry:
+            for key in REQUEST_METADATA_KEYS:
+                value = entry.get(key)
+                if value is not None:
+                    metadata[key] = value
     return metadata
 
 
@@ -129,7 +160,12 @@ def iter_rows(table, batch_size: int):
         yield from batch.to_pylist()
 
 
-def export_rows(rows, output_dir: Path, rows_per_file: int) -> tuple[int, list[Path]]:
+def export_rows(
+    rows,
+    output_dir: Path,
+    rows_per_file: int,
+    request_index: dict[int, dict],
+) -> tuple[int, list[Path]]:
     total_rows = 0
     file_index = 1
     rows_in_file = 0
@@ -141,7 +177,7 @@ def export_rows(rows, output_dir: Path, rows_per_file: int) -> tuple[int, list[P
             vectorize_row = {
                 "id": row["chunk_id"],
                 "values": row["vector"],
-                "metadata": clean_metadata(row),
+                "metadata": clean_metadata(row, request_index),
             }
             handle.write(json.dumps(vectorize_row) + "\n")
             total_rows += 1
@@ -167,22 +203,22 @@ def main() -> None:
     args = build_parser().parse_args()
     validate_args(args)
 
+    if not args.fyi_data_dir.exists():
+        raise SystemExit(f"FYI data dir not found: {args.fyi_data_dir}")
+    request_index = fyi_request_metadata.load_request_metadata(args.fyi_data_dir)
+    print(f"Loaded request metadata for {len(request_index)} FYI requests.")
+
     table = open_chunks_table(args.persist_dir, args.table_name)
     total_rows, output_files = export_rows(
         iter_rows(table, args.batch_size),
         args.output_dir,
         args.rows_per_file,
+        request_index,
     )
 
     print(f"Exported {total_rows} vectors into {len(output_files)} NDJSON file(s).")
     for path in output_files:
         print(path)
-
-    print("\nNext step when ready:")
-    print("1. Ensure your CLOUDFLARE_API_TOKEN has 'Vectorize: Edit' permissions.")
-    print("2. Create the index: wrangler vectorize create fyi_index --dimensions=1024 --metric=cosine")
-    for path in output_files:
-        print(f"3. Upload: wrangler vectorize insert fyi_index --file={path}")
 
 
 if __name__ == "__main__":
