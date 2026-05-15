@@ -236,6 +236,31 @@ uses the top 5 reranked citations for answer generation by default.
 If BM25 fails, the route logs a warning and falls back to Vectorize-only
 retrieval. If reranking fails, the route falls back to fused order.
 
+## Abuse Protection
+
+The public search route has cheap checks before it starts any embedding,
+Vectorize, reranking, or answer-generation work:
+
+* requests with a non-JSON `Content-Type` return `415`
+* request bodies over 4 KB return `413`
+* malformed JSON returns `400`
+* questions are still capped at 700 normalized characters
+* each hashed client IP plus user-agent is limited to 12 searches per minute
+  and 200 searches per day
+
+Rate-limit counters live in the `search_rate_limits` table in `sunlight-search`.
+The table is created by:
+
+```text
+cloudflare/search-migrations/0002_search_rate_limits.sql
+```
+
+The Worker stores only a truncated SHA-256 client hash, not the raw IP address.
+If the rate-limit table is unavailable, the Worker logs a warning and allows the
+request. That keeps search available during transient D1 issues, while the
+normal deployed path rejects abusive bursts with `429` and a `Retry-After`
+header.
+
 ## FTS Query Sanitization
 
 User text is not passed directly into `MATCH`. The runtime transforms questions

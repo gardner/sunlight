@@ -13,6 +13,13 @@ import {
   normalizeSearchQuestion,
   rerankCitations,
 } from "../../../lib/search";
+import {
+  SearchRequestError,
+  assertContentLength,
+  assertSupportedContentType,
+  checkSearchRateLimit,
+  readLimitedSearchJsonBody,
+} from "../../../lib/search-security";
 
 const EMBEDDING_MODEL = "@cf/qwen/qwen3-embedding-0.6b";
 const ANSWER_MODEL = "@cf/google/gemma-4-26b-a4b-it";
@@ -25,7 +32,28 @@ const MAX_RESULT_COUNT = 10;
 
 export async function POST(request: Request) {
   try {
-    const body = await readJsonBody(request);
+    assertSupportedContentType(request);
+    assertContentLength(request);
+
+    const rateLimit = await checkSearchRateLimit(env.SEARCH_DB, request);
+    if (!rateLimit.allowed) {
+      console.warn("Sunlight search rate limited", {
+        limit: rateLimit.limitName,
+        retry_after_seconds: rateLimit.retryAfterSeconds,
+      });
+      return jsonResponse(
+        {
+          error: "Too many search requests. Please try again shortly.",
+          retryAfterSeconds: rateLimit.retryAfterSeconds,
+        },
+        429,
+        {
+          "retry-after": String(rateLimit.retryAfterSeconds ?? 60),
+        },
+      );
+    }
+
+    const body = await readLimitedSearchJsonBody(request);
     const question = normalizeSearchQuestion(body.question ?? body.query ?? body.message);
     const resultCount = normalizeResultCount(body.topK);
     const startedAt = Date.now();
@@ -104,6 +132,10 @@ export async function POST(request: Request) {
       question,
     });
   } catch (error) {
+    if (error instanceof SearchRequestError) {
+      return jsonResponse({ error: error.message }, error.status);
+    }
+
     if (error instanceof SearchInputError) {
       return jsonResponse({ error: error.message }, 400);
     }
@@ -116,15 +148,6 @@ export async function POST(request: Request) {
       },
       502,
     );
-  }
-}
-
-async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
-  try {
-    const value = await request.json();
-    return isRecord(value) ? value : {};
-  } catch {
-    return {};
   }
 }
 
@@ -201,15 +224,12 @@ async function timeAsync<T>(operation: () => Promise<T>): Promise<{ durationMs: 
   };
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(body: unknown, status = 200, headers?: HeadersInit): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("cache-control", "no-store");
+
   return Response.json(body, {
-    headers: {
-      "cache-control": "no-store",
-    },
+    headers: responseHeaders,
     status,
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

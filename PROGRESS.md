@@ -211,6 +211,12 @@ Completed:
   fusion, and reranking score preservation.
 * Updated `docs/SEARCH.md` with the implemented BM25 sidecar, importer commands,
   hybrid fusion behavior, AI Search comparison plan, and eval plan.
+* Added request-size, content-type, malformed JSON, and D1-backed per-client
+  rate-limit protections to the public search API.
+* Added search migration `0002_search_rate_limits.sql` and applied it to remote
+  `sunlight-search`.
+* Added TypeScript coverage for search request validation and rate-limit bucket
+  construction.
 
 ## Verification
 
@@ -271,6 +277,17 @@ uv run pre-commit run --files apps/landing/app/api/search/route.ts apps/landing/
 pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
 curl -s -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?"}'
 timeout 45 pnpm dlx wrangler@latest tail sunlight-landing --format=json --config apps/landing/wrangler.jsonc
+pnpm dlx wrangler@latest d1 migrations apply sunlight-search --remote --config apps/landing/wrangler.jsonc
+pnpm test:ts
+pnpm exec tsc --noEmit
+pnpm landing:build
+pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc --dry-run
+uv run pre-commit run --files apps/landing/app/api/search/route.ts apps/landing/lib/search-security.ts apps/landing/lib/search-security.test.ts cloudflare/search-migrations/0002_search_rate_limits.sql docs/SEARCH.md PROGRESS.md
+pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
+curl -s -o /tmp/sunlight_bad_content_type.json -w '%{http_code}\n' -X POST https://sunlight.nz/api/search -H 'content-type: text/plain' -d '{"question":"What did Auckland Council release?"}'
+node -e 'process.stdout.write(JSON.stringify({question:"x".repeat(5000)}))' | curl -s -o /tmp/sunlight_large_body.json -w '%{http_code}\n' -X POST https://sunlight.nz/api/search -H 'content-type: application/json' --data-binary @-
+ua="sunlight-rl-test-$(date +%s)"; for i in $(seq 1 13); do curl -s -o /tmp/sunlight_rate_limit.json -w '%{http_code} ' -A "$ua" -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{'; done
+curl -s -A "sunlight-normal-smoke-$(date +%s)" -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?","topK":1}'
 ```
 
 ## Notes
@@ -323,9 +340,11 @@ Important naming boundary:
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
 4. Build a small RAG eval set covering exact-term, semantic, numeric, live-log
    failure, and no-answer queries before tuning hybrid weights.
-5. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+5. Add exact query response caching for `/api/search` to reduce repeated answer
+   generation cost and latency.
+6. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-6. Do a controlled live Cloudflare Email Sending test before sending to real
+7. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-7. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+8. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
