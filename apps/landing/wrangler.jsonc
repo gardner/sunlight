@@ -23,5 +23,13 @@
       "index_name": "fyi-v2",
       "remote": true
     }
+  ],
+  "d1_databases": [
+    {
+      "binding": "SEARCH_DB",
+      "database_name": "sunlight-search",
+      "database_id": "be61ceef-eed3-43cd-95d2-cd762f5fd59f",
+      "migrations_dir": "../../cloudflare/search-migrations"
+    }
   ]
 }

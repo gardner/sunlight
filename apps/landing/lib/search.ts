@@ -1,5 +1,62 @@
 const MIN_QUESTION_LENGTH = 4;
 const MAX_QUESTION_LENGTH = 700;
+const MAX_FTS_TERMS = 12;
+const VECTOR_WEIGHT = 0.55;
+const BM25_WEIGHT = 0.45;
+const RRF_K = 60;
+const FTS_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "all",
+  "also",
+  "and",
+  "any",
+  "are",
+  "been",
+  "between",
+  "but",
+  "can",
+  "could",
+  "did",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "information",
+  "into",
+  "its",
+  "near",
+  "not",
+  "official",
+  "or",
+  "please",
+  "provide",
+  "provided",
+  "release",
+  "released",
+  "request",
+  "requested",
+  "show",
+  "that",
+  "the",
+  "their",
+  "there",
+  "these",
+  "this",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+  "would",
+]);
 
 export class SearchInputError extends Error {
   constructor(message: string) {
@@ -15,6 +72,9 @@ export interface SearchCitation {
   chunkId: string;
   chunkIndex?: number;
   documentId?: string;
+  bm25Rank?: number;
+  bm25Score?: number;
+  fusedScore?: number;
   label: string;
   originalFilename?: string;
   requestUrl?: string;
@@ -24,6 +84,7 @@ export interface SearchCitation {
   snippet: string;
   sourceUrl?: string;
   title: string;
+  vectorRank?: number;
   vectorScore?: number;
 }
 
@@ -31,6 +92,22 @@ interface VectorizeLikeMatch {
   id?: string;
   metadata?: Record<string, unknown>;
   score?: number;
+}
+
+export interface Bm25SearchRow extends Record<string, unknown> {
+  authority_category?: unknown;
+  authority_name?: unknown;
+  authority_slug?: unknown;
+  bm25_score?: unknown;
+  chunk_id?: unknown;
+  chunk_index?: unknown;
+  document_id?: unknown;
+  original_filename?: unknown;
+  request_title?: unknown;
+  request_url?: unknown;
+  request_year?: unknown;
+  source_url?: unknown;
+  text_preview?: unknown;
 }
 
 export function normalizeSearchQuestion(value: unknown): string {
@@ -97,6 +174,40 @@ export function mapVectorizeMatchToCitation(
     snippet: collapseWhitespace(readString(metadata, "text_preview") ?? ""),
     sourceUrl: readHttpUrl(metadata, "source_url"),
     title,
+    vectorRank: index + 1,
+    vectorScore: roundScore(typeof match.score === "number" ? match.score : 0),
+  };
+}
+
+export function mapBm25RowToCitation(row: Bm25SearchRow, index: number): SearchCitation {
+  const chunkId = readString(row, "chunk_id") ?? `bm25_match_${index + 1}`;
+  const originalFilename = readString(row, "original_filename");
+  const authorityName = readString(row, "authority_name");
+  const documentId = readString(row, "document_id");
+  const title =
+    readString(row, "request_title") ??
+    originalFilename ??
+    (authorityName ? `${authorityName} disclosure` : undefined) ??
+    documentId ??
+    chunkId;
+
+  return {
+    authorityCategory: readString(row, "authority_category"),
+    authorityName,
+    authoritySlug: readString(row, "authority_slug"),
+    bm25Rank: index + 1,
+    bm25Score: roundScore(readNumber(row, "bm25_score") ?? 0),
+    chunkId,
+    chunkIndex: readNumber(row, "chunk_index"),
+    documentId,
+    label: `Source ${index + 1}`,
+    originalFilename,
+    requestUrl: readHttpUrl(row, "request_url"),
+    requestYear: readNumber(row, "request_year"),
+    score: 0,
+    snippet: collapseWhitespace(readString(row, "text_preview") ?? ""),
+    sourceUrl: readHttpUrl(row, "source_url"),
+    title,
   };
 }
 
@@ -151,17 +262,59 @@ export function rerankCitations(
         return [];
       }
 
-      return [{
+      return [removeUndefinedValues({
         ...citation,
         rerankScore: roundScore(score),
         score: roundScore(score),
-        vectorScore: citation.score,
-      }];
+        vectorScore: citation.vectorScore,
+      })];
     })
     .sort((left, right) => right.score - left.score);
 
   const ranked = scored.length > 0 ? scored : citations;
   return relabelCitations(ranked.slice(0, topK));
+}
+
+export function buildFtsMatchQuery(question: string): string {
+  const terms = Array.from(question.toLocaleLowerCase("en-NZ").matchAll(/[\p{L}\p{N}_]+/gu))
+    .map(([term]) => term)
+    .filter((term) => term.length >= 2 && !FTS_STOP_WORDS.has(term));
+  const uniqueTerms = Array.from(new Set(terms)).slice(0, MAX_FTS_TERMS);
+
+  return uniqueTerms.map(quoteFtsTerm).join(" OR ");
+}
+
+export function fuseSearchCandidates(
+  vectorCandidates: SearchCitation[],
+  bm25Candidates: SearchCitation[],
+  limit: number,
+): SearchCitation[] {
+  const candidates = new Map<string, SearchCitation>();
+
+  vectorCandidates.forEach((candidate, index) => {
+    upsertFusedCandidate(candidates, candidate, {
+      fusedContribution: VECTOR_WEIGHT * reciprocalRank(index + 1),
+      vectorRank: index + 1,
+      vectorScore: candidate.vectorScore ?? candidate.score,
+    });
+  });
+
+  bm25Candidates.forEach((candidate, index) => {
+    upsertFusedCandidate(candidates, candidate, {
+      bm25Rank: index + 1,
+      bm25Score: candidate.bm25Score,
+      fusedContribution: BM25_WEIGHT * reciprocalRank(index + 1),
+    });
+  });
+
+  return relabelCitations(
+    Array.from(candidates.values())
+      .sort((left, right) => {
+        const byScore = (right.fusedScore ?? 0) - (left.fusedScore ?? 0);
+        return byScore || left.label.localeCompare(right.label);
+      })
+      .slice(0, limit),
+  );
 }
 
 export function extractAnswerText(value: unknown): string {
@@ -285,6 +438,48 @@ function readHttpUrl(record: Record<string, unknown>, key: string): string | und
 
 function roundScore(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function quoteFtsTerm(term: string): string {
+  return `"${term.replaceAll('"', '""')}"`;
+}
+
+function reciprocalRank(rank: number): number {
+  return 1 / (RRF_K + rank);
+}
+
+function upsertFusedCandidate(
+  candidates: Map<string, SearchCitation>,
+  candidate: SearchCitation,
+  details: {
+    bm25Rank?: number;
+    bm25Score?: number;
+    fusedContribution: number;
+    vectorRank?: number;
+    vectorScore?: number;
+  },
+) {
+  const existing = candidates.get(candidate.chunkId);
+  const currentFusedScore = existing?.fusedScore ?? 0;
+  const fusedScore = currentFusedScore + details.fusedContribution;
+  const merged = {
+    ...candidate,
+    ...existing,
+    bm25Rank: existing?.bm25Rank ?? details.bm25Rank ?? candidate.bm25Rank,
+    bm25Score: existing?.bm25Score ?? details.bm25Score ?? candidate.bm25Score,
+    fusedScore: roundScore(fusedScore),
+    score: roundScore(fusedScore),
+    vectorRank: existing?.vectorRank ?? details.vectorRank ?? candidate.vectorRank,
+    vectorScore: existing?.vectorScore ?? details.vectorScore ?? candidate.vectorScore,
+  };
+
+  candidates.set(candidate.chunkId, removeUndefinedValues(merged));
+}
+
+function removeUndefinedValues(citation: SearchCitation): SearchCitation {
+  return Object.fromEntries(
+    Object.entries(citation).filter(([, value]) => value !== undefined),
+  ) as unknown as SearchCitation;
 }
 
 function parseRerankScores(value: unknown): { index: number; score: number }[] {

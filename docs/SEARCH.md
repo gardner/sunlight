@@ -1,7 +1,7 @@
 # Sunlight Search
 
-This document records the public `sunlight.nz/search` design, the current
-retrieval path, and the planned BM25/vector hybrid path.
+This document records the public `sunlight.nz/search` retrieval path, the D1
+BM25 sidecar, and the planned comparison work against Cloudflare AI Search.
 
 ## Current State
 
@@ -25,200 +25,256 @@ Current retrieval pipeline:
 ```text
 user question
   -> Workers AI embedding: @cf/qwen/qwen3-embedding-0.6b
-  -> Vectorize index: fyi-v2, top 20 candidates
+  -> Vectorize index: fyi-v2, top 50 semantic candidates
+  -> D1 FTS5 sidecar: sunlight-search, top 50 BM25 candidates
+  -> reciprocal-rank fusion by chunk_id, top 20 fused candidates
   -> Workers AI reranker: @cf/baai/bge-reranker-base
-  -> top 5 reranked citations
+  -> top 5 reranked citations by default, max 10
   -> Workers AI answer model: @cf/google/gemma-4-26b-a4b-it
   -> JSON answer + citations
 ```
 
-The route returns both scores when reranking succeeds:
+The route returns score fields that identify each retrieval stage:
 
 ```json
 {
   "score": 0.398,
   "rerankScore": 0.398,
-  "vectorScore": 0.567
+  "fusedScore": 0.016,
+  "vectorScore": 0.567,
+  "vectorRank": 3,
+  "bm25Score": -8.346,
+  "bm25Rank": 1
 }
 ```
 
-`score` is the display/sort score for the current stage. After reranking, it is
-the reranker score. `vectorScore` preserves the original Vectorize score for
-debugging.
+`score` is the display/sort score for the latest completed stage. After
+reranking, it is the reranker score. `vectorScore`, `bm25Score`, and
+`fusedScore` preserve earlier retrieval evidence for debugging and future evals.
 
-## Why Add BM25
+## Why BM25
 
-Pure vector search is missing some exact-term intent. Recent live tests showed a
-query about council leisure-centre contracts retrieving loosely related council
-contract material. The reranker improved ordering once a better candidate was in
-the Vectorize candidate set, but vector search still has to retrieve that
-candidate first.
+Pure vector search missed some exact-term intent. A query about council
+leisure-centre contracts retrieved loosely related council contract material
+unless the relevant candidate was already in the Vectorize candidate set.
 
-BM25 should help with:
+BM25 helps with:
 
 * exact authority names, request titles, and unusual terms
 * acronyms and statute terms
 * numeric identifiers, file names, and proper nouns
 * queries where dense embeddings overgeneralize
 
-BM25 should not replace semantic search. It should feed a hybrid candidate set
-that is then fused and reranked.
+BM25 does not replace semantic search. It feeds a hybrid candidate set that is
+then fused and reranked.
 
-## Does BM25 Work With D1?
+## D1 BM25 Sidecar
 
-Yes. Cloudflare D1 supports SQLite FTS5, and SQLite FTS5 includes the `bm25()`
-ranking function.
-
-Important D1 constraints:
-
-* D1 paid databases are limited to 10 GB.
-* Individual string/BLOB/row values are limited to 2 MB.
-* SQL query duration is limited to 30 seconds.
-* A D1 database processes queries through a single underlying database instance,
-  so slow FTS queries can affect throughput.
-
-For Sunlight, this means D1 is a reasonable lexical sidecar for chunk-level text,
-not for storing whole PDF bodies or huge markdown files. Full source artifacts
-should stay in R2; D1 should store chunk text and citation metadata needed for
-retrieval.
-
-## Proposed D1 FTS Schema
-
-Add a dedicated search database or tables to the public/search database, not the
-private operational admin database.
-
-Minimal table shape:
-
-```sql
-CREATE TABLE disclosed_chunks (
-  chunk_id TEXT PRIMARY KEY,
-  document_id TEXT NOT NULL,
-  source TEXT NOT NULL,
-  authority_name TEXT,
-  authority_slug TEXT,
-  authority_category TEXT,
-  request_title TEXT,
-  request_url TEXT,
-  source_url TEXT,
-  original_filename TEXT,
-  markdown_r2_key TEXT,
-  chunk_index INTEGER NOT NULL,
-  chunk_text TEXT NOT NULL,
-  text_preview TEXT NOT NULL,
-  request_year INTEGER
-);
-
-CREATE VIRTUAL TABLE disclosed_chunks_fts USING fts5(
-  chunk_id UNINDEXED,
-  document_id UNINDEXED,
-  authority_name,
-  request_title,
-  original_filename,
-  chunk_text,
-  tokenize='unicode61 remove_diacritics 2'
-);
-```
-
-This intentionally duplicates chunk text into the FTS table. That is simpler and
-more explicit than starting with external-content FTS tables. We can optimize
-storage later if D1 size or import speed becomes a real problem.
-
-BM25 query shape:
-
-```sql
-SELECT
-  chunk_id,
-  bm25(disclosed_chunks_fts, 1.5, 3.0, 1.0, 1.0) AS bm25_score
-FROM disclosed_chunks_fts
-WHERE disclosed_chunks_fts MATCH ?
-ORDER BY bm25_score
-LIMIT 50;
-```
-
-SQLite FTS5 returns better BM25 matches as lower numbers, so fusion should use
-rank order rather than treating the raw score as "higher is better".
-
-The query string must be sanitized for FTS5 syntax. Do not pass arbitrary user
-text directly into `MATCH` without escaping quotes/operators or transforming it
-into a safe token expression.
-
-## Hybrid Retrieval Plan
-
-Recommended runtime path:
+Cloudflare D1 supports SQLite FTS5, and SQLite FTS5 includes the `bm25()`
+ranking function. Sunlight uses a separate public search database rather than
+the operational admin database:
 
 ```text
-question
-  -> embed question
-  -> Vectorize top 50 with metadata
-  -> D1 FTS5 BM25 top 50
-  -> fuse by chunk_id
-  -> BGE rerank top 20 fused candidates
-  -> answer from top 5
+D1 database: sunlight-search
+D1 database id: be61ceef-eed3-43cd-95d2-cd762f5fd59f
+Wrangler binding: SEARCH_DB
+Migration directory: cloudflare/search-migrations
 ```
 
-Run Vectorize and D1 in parallel:
+The migration is:
+
+```text
+cloudflare/search-migrations/0001_disclosed_chunks_fts.sql
+```
+
+It creates:
+
+* `disclosed_chunks` for citation metadata and capped chunk text
+* `disclosed_chunks_fts` as an FTS5 virtual table
+* insert, update, and delete triggers to keep the FTS table synchronized
+
+The indexed FTS columns are:
+
+```sql
+authority_name,
+request_title,
+original_filename,
+chunk_text
+```
+
+The runtime BM25 query weights these fields as:
+
+```sql
+bm25(disclosed_chunks_fts, 0.0, 0.0, 2.0, 3.0, 1.0, 1.0)
+```
+
+That means unindexed metadata columns have zero weight, request titles get the
+highest lexical weight, authority names get the next highest weight, and file
+names/body text remain useful but less dominant.
+
+SQLite FTS5 returns better BM25 matches as lower numbers. The production search
+path therefore uses BM25 rank order for fusion rather than treating the raw
+negative score as "higher is better".
+
+## Import Pipeline
+
+BM25 rows are generated from FYI markdown frontmatter and body text:
+
+```text
+fyi/markdown/*.md
+  -> scripts/export_bm25_to_d1.py
+  -> storage/d1_bm25_import/bm25_*.sql
+  -> D1 sunlight-search
+```
+
+The exporter uses the same chunker defaults as the Vectorize pipeline:
+
+```text
+chunk size: 8192
+chunk overlap: 128
+```
+
+Chunk IDs are deterministic:
+
+```text
+chunk_{document_id}_{chunk_index:04d}_{sha1(original_chunk_text)[:12]}
+```
+
+The D1 sidecar stores capped, normalized text for FTS:
+
+```text
+default max chunk text chars: 12000
+default text preview chars: 800
+```
+
+The cap keeps each SQL statement below D1 statement limits while preserving
+enough body text for lexical retrieval. Source artifacts remain outside D1.
+
+Generate import shards:
+
+```bash
+uv run python scripts/export_bm25_to_d1.py \
+  --output-dir storage/d1_bm25_import \
+  --rows-per-file 500 \
+  --reset
+```
+
+Apply generated shards to remote D1:
+
+```bash
+uv run python scripts/export_bm25_to_d1.py \
+  --output-dir storage/d1_bm25_import \
+  --apply-existing \
+  --remote
+```
+
+Apply selected shards after regenerating a subset:
+
+```bash
+uv run python scripts/export_bm25_to_d1.py \
+  --output-dir storage/d1_bm25_import \
+  --apply-existing \
+  --remote \
+  --shard 101 \
+  --shard 111
+```
+
+The current remote import has:
+
+```text
+disclosed_chunks rows: 160,479
+D1 size after import: about 774 MB
+```
+
+Smoke-check row count:
+
+```bash
+pnpm dlx wrangler@latest d1 execute sunlight-search \
+  --remote \
+  --config apps/landing/wrangler.jsonc \
+  --command "SELECT count(*) AS rows FROM disclosed_chunks;" \
+  --json
+```
+
+Smoke-check BM25:
+
+```bash
+pnpm dlx wrangler@latest d1 execute sunlight-search \
+  --remote \
+  --config apps/landing/wrangler.jsonc \
+  --command "SELECT c.request_title, c.authority_name, bm25(disclosed_chunks_fts, 0.0, 0.0, 2.0, 3.0, 1.0, 1.0) AS score, c.text_preview FROM disclosed_chunks_fts JOIN disclosed_chunks c ON c.chunk_id = disclosed_chunks_fts.chunk_id WHERE disclosed_chunks_fts MATCH '\"leisure\" OR \"centre\" OR \"contracts\"' ORDER BY score LIMIT 5;" \
+  --json
+```
+
+## Hybrid Fusion
+
+The Worker runs BM25 and Vectorize retrieval in parallel where possible:
 
 ```ts
+const bm25Promise = searchBm25Candidates(question, 50);
+const embedding = await env.AI.run(EMBEDDING_MODEL, { text: [question] });
+const vector = coerceEmbeddingVector(embedding);
 const [vectorMatches, bm25Matches] = await Promise.all([
-  env.FYI_VECTORS.query(vector, {
-    topK: 50,
-    returnMetadata: "all",
-  }),
-  searchBm25(env.SEARCH_DB, question, 50),
+  env.FYI_VECTORS.query(vector, { topK: 50, returnMetadata: "all" }),
+  bm25Promise,
 ]);
 ```
 
-Use Reciprocal Rank Fusion first. It is robust because it depends on ranks, not
-on incompatible score scales:
-
-```ts
-function rrf(rank: number, k = 60) {
-  return 1 / (k + rank);
-}
-```
-
-Initial fusion formula:
+Candidate fusion uses weighted Reciprocal Rank Fusion:
 
 ```text
-fused_score =
-  0.55 * rrf(vector_rank)
-  + 0.45 * rrf(bm25_rank)
+rrf(rank) = 1 / (60 + rank)
+fused_score = 0.55 * rrf(vector_rank) + 0.45 * rrf(bm25_rank)
 ```
 
-Then pass the top 20 fused candidates into `@cf/baai/bge-reranker-base` and keep
-the top 5 for generation. The reranker is still useful after hybrid retrieval
-because it evaluates query/document relevance directly.
+The initial weights intentionally keep semantic retrieval slightly dominant
+while giving exact-term matches enough influence to enter the reranker window.
 
-Keep these fields in returned citations for debugging:
+The route sends the top 20 fused candidates to `@cf/baai/bge-reranker-base` and
+uses the top 5 reranked citations for answer generation by default.
 
-```json
-{
-  "score": 0.72,
-  "rerankScore": 0.72,
-  "fusedScore": 0.029,
-  "vectorScore": 0.58,
-  "vectorRank": 4,
-  "bm25Score": -8.3,
-  "bm25Rank": 1
-}
+If BM25 fails, the route logs a warning and falls back to Vectorize-only
+retrieval. If reranking fails, the route falls back to fused order.
+
+## FTS Query Sanitization
+
+User text is not passed directly into `MATCH`. The runtime transforms questions
+into a safe quoted OR expression:
+
+```text
+Council "leisure" OR NEAR(contracts) -x
+  -> "council" OR "leisure" OR "contracts"
 ```
+
+Rules:
+
+* lowercase with `en-NZ`
+* keep Unicode letters, numbers, and underscores
+* drop one-character terms
+* drop a small set of English and release-archive stopwords, such as `what`,
+  `information`, `released`, `request`, `or`, and `near`
+* de-duplicate terms in original order
+* limit to 12 terms
+* quote every term for FTS5
+
+This preserves useful lexical recall while avoiding raw FTS operators from user
+input.
 
 ## Cloudflare AI Search Alternative
 
-Cloudflare AI Search has a managed hybrid mode that can return vector and
-keyword/BM25 scoring details. That is attractive for the R2 markdown pipeline in
-`docs/RAG.md`.
+Cloudflare AI Search has managed hybrid search that can combine vector and
+keyword scoring. That is the planned comparison pipeline once
+`sunlight-corpus` markdown is uploaded to R2.
 
-However, AI Search is a separate managed index. It does not directly hybridize
-against our existing `fyi-v2` Vectorize index. For the current landing search
-path, "hybrid search with Vectorize" means implementing the lexical sidecar and
-fusion ourselves.
+AI Search is a separate managed index. It does not directly hybridize against
+the existing `fyi-v2` Vectorize index. For the current landing search path,
+"hybrid search with Vectorize" means using this D1 FTS5 sidecar and local fusion.
 
 Decision:
 
 * Use D1 FTS5 + Vectorize for the controlled `sunlight.nz/search` path.
-* Use AI Search hybrid mode as the managed comparison pipeline once
-  `sunlight-corpus` markdown is uploaded to R2.
+* Add AI Search hybrid mode later as the managed comparison pipeline.
+* Run RAG evaluations against both before declaring either "better".
 
 ## Do We Need LlamaIndex?
 
@@ -226,12 +282,9 @@ No, not for the production Worker search path.
 
 Reasons:
 
-* The runtime needs three direct platform calls: Workers AI, Vectorize, and D1.
-  A framework would mostly wrap APIs we already need to control.
-* LlamaIndex.TS is a general data framework. It is useful for local experiments,
-  indexing prototypes, and evaluation harnesses, but it does not remove the need
-  for D1 FTS schema/import work.
-* Keeping the Worker path direct makes bundle size, edge compatibility, latency,
+* The runtime needs direct platform calls to Workers AI, Vectorize, and D1.
+* A framework does not remove the need for D1 FTS schema/import work.
+* Keeping the Worker path direct keeps bundle size, edge compatibility, latency,
   and failure modes easier to reason about.
 
 Reasonable LlamaIndex use:
@@ -240,7 +293,7 @@ Reasonable LlamaIndex use:
 * eval harness prototypes
 * comparing retriever strategies locally against LanceDB/D1 exports
 
-Avoid using it in the public Worker unless a specific feature proves worth the
+Avoid adding it to the public Worker unless a specific feature proves worth the
 extra dependency and runtime surface.
 
 ## AI SDK And AI Gateway
@@ -274,8 +327,8 @@ route receives UI messages
 
 Cloudflare AI Gateway can be used with the AI SDK in two distinct ways:
 
-1. `ai-gateway-provider` for Gateway/unified-provider calls with
-   `accountId`, `gateway`, and `apiKey`.
+1. `ai-gateway-provider` for Gateway/unified-provider calls with `accountId`,
+   `gateway`, and `apiKey`.
 2. `workers-ai-provider` with the Worker `AI` binding and a `gateway` option.
 
 For now, keep direct `env.AI.run` for embeddings and reranking. The AI SDK
@@ -299,31 +352,33 @@ Recommended AI SDK migration:
 5. Route answer-generation calls through AI Gateway once the gateway name and
    observability requirements are settled.
 
-## Implementation Steps For BM25 Hybrid
+## Evaluation Plan
 
-1. Add D1 binding for a public search database.
-2. Add a migration for `disclosed_chunks` and `disclosed_chunks_fts`.
-3. Export chunk rows from LanceDB into D1 import shards.
-4. Import in batches small enough for D1 statement and file limits.
-5. Add `searchBm25()` helper with FTS query escaping and unit tests.
-6. Add `fuseSearchResults()` helper with RRF and unit tests.
-7. Change `/api/search` to run Vectorize and BM25 in parallel.
-8. Feed top 20 fused results into BGE reranker.
-9. Keep top 5 for generation.
-10. Add live log timing for each retrieval stage:
-    `embed_ms`, `vector_ms`, `bm25_ms`, `fusion_ms`, `rerank_ms`, `answer_ms`.
-11. Build a small eval set before tuning weights.
+The next retrieval-quality decision should be eval-driven.
 
-## Open Questions
+Build a small labeled set first:
 
-* Should the BM25 sidecar live in the existing `sunlight-requests` D1 database
-  or a separate `sunlight-search` database? Prefer separate unless operational
-  simplicity wins.
-* Should BM25 index only `text_preview`, full `chunk_text`, or a windowed chunk
-  body from R2 markdown? Prefer full `chunk_text` with a measured D1 size check.
-* Should fusion use RRF only, or a weighted normalized score? Start with RRF.
-* Should exact metadata filters, such as `authority_slug` or `request_year`, be
-  applied before both retrieval branches? Yes, once the UI exposes filters.
+* exact-term requests, such as authority names, legislation, and file names
+* semantic requests, such as "contracts for running council pools"
+* numeric identifier requests
+* failure cases from live logs
+* queries where the right answer is absent
+
+Measure at least:
+
+* retrieval recall at 5, 10, 20, and 50 before generation
+* reranked citation relevance at 5
+* grounded answer quality
+* citation faithfulness
+* latency by stage
+
+Compare:
+
+* Vectorize only
+* Vectorize + D1 BM25 + RRF + BGE reranker
+* Cloudflare AI Search hybrid mode
+
+Use the same answer model and prompt while comparing retrievers.
 
 ## References
 

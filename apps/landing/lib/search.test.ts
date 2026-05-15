@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAnswerPrompt,
+  buildFtsMatchQuery,
   buildRerankContexts,
   coerceEmbeddingVector,
   extractAnswerText,
+  fuseSearchCandidates,
+  mapBm25RowToCitation,
   mapVectorizeMatchToCitation,
   normalizeSearchQuestion,
   rerankCitations,
@@ -63,6 +66,8 @@ describe("mapVectorizeMatchToCitation", () => {
       label: "Source 1",
       score: 0.812,
       title: "Council leisure centre contracts",
+      vectorRank: 1,
+      vectorScore: 0.812,
     });
     expect(citation.requestUrl).toBe("https://fyi.org.nz/request/123");
     expect(citation.sourceUrl).toContain("/attach/1/");
@@ -89,6 +94,36 @@ describe("mapVectorizeMatchToCitation", () => {
   });
 });
 
+describe("mapBm25RowToCitation", () => {
+  it("normalizes citation metadata from D1 BM25 rows", () => {
+    expect(
+      mapBm25RowToCitation(
+        {
+          authority_name: "Auckland Council",
+          bm25_score: -8.3456,
+          chunk_id: "chunk_bm25",
+          chunk_index: 2,
+          document_id: "doc_bm25",
+          request_title: "Leisure centre contracts",
+          request_url: "https://fyi.org.nz/request/29087",
+          text_preview: "The document names the supplier.",
+        },
+        0,
+      ),
+    ).toMatchObject({
+      authorityName: "Auckland Council",
+      bm25Rank: 1,
+      bm25Score: -8.346,
+      chunkId: "chunk_bm25",
+      documentId: "doc_bm25",
+      label: "Source 1",
+      score: 0,
+      snippet: "The document names the supplier.",
+      title: "Leisure centre contracts",
+    });
+  });
+});
+
 describe("buildAnswerPrompt", () => {
   it("numbers citations and includes snippets", () => {
     const prompt = buildAnswerPrompt("What contracts were released?", [
@@ -104,6 +139,101 @@ describe("buildAnswerPrompt", () => {
     expect(prompt).toContain("Question: What contracts were released?");
     expect(prompt).toContain("[1] Contract release");
     expect(prompt).toContain("The council released two contracts.");
+  });
+});
+
+describe("buildFtsMatchQuery", () => {
+  it("turns user text into a safe OR expression", () => {
+    expect(buildFtsMatchQuery('Council "leisure" OR NEAR(contracts) -x')).toBe(
+      '"council" OR "leisure" OR "contracts"',
+    );
+  });
+
+  it("deduplicates and limits terms", () => {
+    expect(buildFtsMatchQuery("ACC acc a b c")).toBe('"acc"');
+  });
+});
+
+describe("fuseSearchCandidates", () => {
+  it("combines Vectorize and BM25 candidates with reciprocal rank fusion", () => {
+    expect(
+      fuseSearchCandidates(
+        [
+          {
+            chunkId: "shared",
+            label: "Source 1",
+            score: 0.9,
+            snippet: "Vector snippet",
+            title: "Shared vector",
+            vectorRank: 1,
+            vectorScore: 0.9,
+          },
+          {
+            chunkId: "vector_only",
+            label: "Source 2",
+            score: 0.8,
+            snippet: "Vector only",
+            title: "Vector only",
+            vectorRank: 2,
+            vectorScore: 0.8,
+          },
+        ],
+        [
+          {
+            bm25Rank: 1,
+            bm25Score: -9,
+            chunkId: "shared",
+            label: "Source 1",
+            score: 0,
+            snippet: "BM25 snippet",
+            title: "Shared BM25",
+          },
+          {
+            bm25Rank: 2,
+            bm25Score: -7,
+            chunkId: "bm25_only",
+            label: "Source 2",
+            score: 0,
+            snippet: "BM25 only",
+            title: "BM25 only",
+          },
+        ],
+        3,
+      ),
+    ).toEqual([
+      {
+        bm25Rank: 1,
+        bm25Score: -9,
+        chunkId: "shared",
+        fusedScore: 0.016,
+        label: "Source 1",
+        score: 0.016,
+        snippet: "Vector snippet",
+        title: "Shared vector",
+        vectorRank: 1,
+        vectorScore: 0.9,
+      },
+      {
+        chunkId: "vector_only",
+        fusedScore: 0.009,
+        label: "Source 2",
+        score: 0.009,
+        snippet: "Vector only",
+        title: "Vector only",
+        vectorRank: 2,
+        vectorScore: 0.8,
+      },
+      {
+        bm25Rank: 2,
+        bm25Score: -7,
+        chunkId: "bm25_only",
+        fusedScore: 0.007,
+        label: "Source 3",
+        score: 0.007,
+        snippet: "BM25 only",
+        title: "BM25 only",
+      },
+    ]);
   });
 });
 
@@ -136,6 +266,7 @@ describe("rerankCitations", () => {
       score: 0.62,
       snippet: "Weak candidate.",
       title: "A",
+      vectorScore: 0.62,
     },
     {
       chunkId: "chunk_b",
@@ -143,6 +274,7 @@ describe("rerankCitations", () => {
       score: 0.58,
       snippet: "Strong candidate.",
       title: "B",
+      vectorScore: 0.58,
     },
     {
       chunkId: "chunk_c",
@@ -150,6 +282,7 @@ describe("rerankCitations", () => {
       score: 0.55,
       snippet: "Middle candidate.",
       title: "C",
+      vectorScore: 0.55,
     },
   ];
 
@@ -193,6 +326,39 @@ describe("rerankCitations", () => {
       {
         ...citations[1],
         label: "Source 2",
+      },
+    ]);
+  });
+
+  it("does not invent vector scores for BM25-only candidates", () => {
+    expect(
+      rerankCitations(
+        [
+          {
+            bm25Rank: 1,
+            bm25Score: -8,
+            chunkId: "chunk_bm25",
+            fusedScore: 0.007,
+            label: "Source 1",
+            score: 0.007,
+            snippet: "Lexical-only candidate.",
+            title: "BM25",
+          },
+        ],
+        { response: [{ id: 0, score: 0.82 }] },
+        1,
+      ),
+    ).toEqual([
+      {
+        bm25Rank: 1,
+        bm25Score: -8,
+        chunkId: "chunk_bm25",
+        fusedScore: 0.007,
+        label: "Source 1",
+        rerankScore: 0.82,
+        score: 0.82,
+        snippet: "Lexical-only candidate.",
+        title: "BM25",
       },
     ]);
   });

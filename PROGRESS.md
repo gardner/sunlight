@@ -2,13 +2,11 @@
 
 ## Current Slice
 
-The terminology rename to authorities is complete and the deployed D1 schema has
-been migrated forward to match it. The authority contact review loop now exists
-in the admin app. The scraper auto-verifies clear best addresses and records
-no-result attempts so human review is only needed for genuinely ambiguous cases.
-The current operational focus is a higher-yield contact discovery pass for the
-2,961 active authorities that still need a usable request address before real
-sends can be enabled.
+The public `sunlight.nz/search` path now has a custom hybrid retriever: semantic
+Vectorize candidates plus D1 FTS5 BM25 candidates, fused with reciprocal rank
+fusion and reranked with Workers AI BGE. The next search slice is to add
+Cloudflare AI Search as a managed comparison pipeline and run RAG evaluations
+against both retrievers.
 
 Completed:
 
@@ -192,6 +190,27 @@ Completed:
 * Added `docs/SEARCH.md` with the current search path, BM25/D1 hybrid plan,
   AI Search alternative, LlamaIndex decision, and AI SDK/Gateway migration notes.
 * Deployed the reranker-enabled landing Worker to `sunlight.nz`.
+* Created the separate D1 search database `sunlight-search` for public retrieval
+  sidecar tables.
+* Added landing Worker `SEARCH_DB` binding and search migrations directory.
+* Added `cloudflare/search-migrations/0001_disclosed_chunks_fts.sql` with
+  `disclosed_chunks`, `disclosed_chunks_fts`, and synchronization triggers.
+* Applied the BM25 sidecar migration to remote D1.
+* Added `scripts/export_bm25_to_d1.py` to build and apply D1 import shards from
+  FYI markdown using the same chunking defaults as the Vectorize pipeline.
+* Imported 160,479 FYI chunks into `sunlight-search`; the remote database is
+  about 774 MB after import.
+* Added D1 BM25 retrieval to `/api/search`, querying top 50 lexical candidates
+  and falling back to Vectorize-only retrieval if BM25 fails.
+* Changed `/api/search` to retrieve Vectorize top 50 and BM25 top 50, fuse by
+  weighted reciprocal rank fusion, rerank the top 20 fused candidates with
+  `@cf/baai/bge-reranker-base`, then answer from the final top 5 by default.
+* Preserved `vectorScore`, `vectorRank`, `bm25Score`, `bm25Rank`, and
+  `fusedScore` in API citations for debugging and later retrieval evals.
+* Added TypeScript coverage for FTS query sanitization, BM25 row mapping, hybrid
+  fusion, and reranking score preservation.
+* Updated `docs/SEARCH.md` with the implemented BM25 sidecar, importer commands,
+  hybrid fusion behavior, AI Search comparison plan, and eval plan.
 
 ## Verification
 
@@ -238,6 +257,20 @@ pnpm dlx wrangler@latest deploy apps/admin/dist/server/ssr/index.js --assets app
 pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --dry-run --config apps/authority/wrangler.jsonc
 pnpm exec wrangler deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --dry-run --config apps/landing/wrangler.jsonc
 pnpm dlx wrangler@latest d1 execute sunlight-requests --remote --command "SELECT COUNT(*) AS total, SUM(contact_status = 'verified') AS verified, SUM(status = 'inactive') AS inactive FROM sunlight_authorities;"
+pnpm dlx wrangler@latest d1 migrations apply sunlight-search --remote --config apps/landing/wrangler.jsonc
+uv run python scripts/export_bm25_to_d1.py --limit 2 --output-dir /tmp/sunlight_bm25_smoke --reset
+uv run python scripts/export_bm25_to_d1.py --output-dir storage/d1_bm25_import --rows-per-file 500 --reset
+uv run python scripts/export_bm25_to_d1.py --output-dir storage/d1_bm25_import --apply-existing --remote
+pnpm dlx wrangler@latest d1 execute sunlight-search --remote --config apps/landing/wrangler.jsonc --command "SELECT count(*) AS rows FROM disclosed_chunks;" --json
+pnpm dlx wrangler@latest d1 execute sunlight-search --remote --config apps/landing/wrangler.jsonc --command "SELECT c.request_title, c.authority_name, bm25(disclosed_chunks_fts, 0.0, 0.0, 2.0, 3.0, 1.0, 1.0) AS score, c.text_preview FROM disclosed_chunks_fts JOIN disclosed_chunks c ON c.chunk_id = disclosed_chunks_fts.chunk_id WHERE disclosed_chunks_fts MATCH '\"leisure\" OR \"centre\" OR \"contracts\"' ORDER BY score LIMIT 5;" --json
+pnpm test:ts
+pnpm exec tsc --noEmit
+pnpm landing:build
+pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc --dry-run
+uv run pre-commit run --files apps/landing/app/api/search/route.ts apps/landing/env.d.ts apps/landing/lib/search.ts apps/landing/lib/search.test.ts apps/landing/wrangler.jsonc cloudflare/search-migrations/0001_disclosed_chunks_fts.sql docs/SEARCH.md PROGRESS.md scripts/export_bm25_to_d1.py
+pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
+curl -s -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?"}'
+timeout 45 pnpm dlx wrangler@latest tail sunlight-landing --format=json --config apps/landing/wrangler.jsonc
 ```
 
 ## Notes
@@ -246,6 +279,8 @@ Cloudflare resources:
 
 * D1 database: `sunlight-requests`
 * D1 database id: `796835ba-d5e5-4ad2-a931-bdf7b3a2b7dc`
+* Search D1 database: `sunlight-search`
+* Search D1 database id: `be61ceef-eed3-43cd-95d2-cd762f5fd59f`
 * R2 bucket: `sunlight-request-artifacts`
 * Zero Trust organization: `Sunlight`
 * Access auth domain: `sunlight-nz.cloudflareaccess.com`
@@ -282,12 +317,12 @@ Important naming boundary:
 1. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-2. Implement the D1 FTS5 BM25 sidecar described in `docs/SEARCH.md`, then fuse
-   Vectorize and BM25 candidates before BGE reranking.
-3. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+2. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-4. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+3. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
+4. Build a small RAG eval set covering exact-term, semantic, numeric, live-log
+   failure, and no-answer queries before tuning hybrid weights.
 5. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
 6. Do a controlled live Cloudflare Email Sending test before sending to real
