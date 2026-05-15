@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAnswerPrompt,
+  buildRerankContexts,
   coerceEmbeddingVector,
   extractAnswerText,
   mapVectorizeMatchToCitation,
   normalizeSearchQuestion,
+  rerankCitations,
 } from "./search";
 
 describe("normalizeSearchQuestion", () => {
@@ -102,6 +104,97 @@ describe("buildAnswerPrompt", () => {
     expect(prompt).toContain("Question: What contracts were released?");
     expect(prompt).toContain("[1] Contract release");
     expect(prompt).toContain("The council released two contracts.");
+  });
+});
+
+describe("buildRerankContexts", () => {
+  it("builds compact context text for the reranker", () => {
+    expect(
+      buildRerankContexts([
+        {
+          authorityName: "Auckland Council",
+          chunkId: "chunk_1",
+          label: "Source 1",
+          score: 0.5,
+          snippet: "Contract details were released.",
+          title: "Leisure contracts",
+        },
+      ]),
+    ).toEqual([
+      {
+        text: "Title: Leisure contracts\nAuthority: Auckland Council\nSnippet: Contract details were released.",
+      },
+    ]);
+  });
+});
+
+describe("rerankCitations", () => {
+  const citations = [
+    {
+      chunkId: "chunk_a",
+      label: "Source 1",
+      score: 0.62,
+      snippet: "Weak candidate.",
+      title: "A",
+    },
+    {
+      chunkId: "chunk_b",
+      label: "Source 2",
+      score: 0.58,
+      snippet: "Strong candidate.",
+      title: "B",
+    },
+    {
+      chunkId: "chunk_c",
+      label: "Source 3",
+      score: 0.55,
+      snippet: "Middle candidate.",
+      title: "C",
+    },
+  ];
+
+  it("orders citations by reranker score and relabels sources", () => {
+    expect(
+      rerankCitations(citations, {
+        response: [
+          { id: 1, score: 0.91 },
+          { id: 2, score: 0.77 },
+          { id: 0, score: 0.1 },
+        ],
+      }, 2),
+    ).toEqual([
+      {
+        chunkId: "chunk_b",
+        label: "Source 1",
+        rerankScore: 0.91,
+        score: 0.91,
+        snippet: "Strong candidate.",
+        title: "B",
+        vectorScore: 0.58,
+      },
+      {
+        chunkId: "chunk_c",
+        label: "Source 2",
+        rerankScore: 0.77,
+        score: 0.77,
+        snippet: "Middle candidate.",
+        title: "C",
+        vectorScore: 0.55,
+      },
+    ]);
+  });
+
+  it("falls back to vector order when reranker output is empty", () => {
+    expect(rerankCitations(citations, { response: [] }, 2)).toEqual([
+      {
+        ...citations[0],
+        label: "Source 1",
+      },
+      {
+        ...citations[1],
+        label: "Source 2",
+      },
+    ]);
   });
 });
 

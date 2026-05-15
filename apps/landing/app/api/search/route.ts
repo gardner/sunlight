@@ -2,22 +2,26 @@ import { env } from "cloudflare:workers";
 import {
   SearchInputError,
   buildAnswerPrompt,
+  buildRerankContexts,
   coerceEmbeddingVector,
   extractAnswerText,
   mapVectorizeMatchToCitation,
   normalizeSearchQuestion,
+  rerankCitations,
 } from "../../../lib/search";
 
 const EMBEDDING_MODEL = "@cf/qwen/qwen3-embedding-0.6b";
 const ANSWER_MODEL = "@cf/google/gemma-4-26b-a4b-it";
-const DEFAULT_TOP_K = 7;
-const MAX_TOP_K = 10;
+const RERANK_MODEL = "@cf/baai/bge-reranker-base" as string;
+const VECTORIZE_CANDIDATE_COUNT = 20;
+const DEFAULT_RESULT_COUNT = 5;
+const MAX_RESULT_COUNT = 10;
 
 export async function POST(request: Request) {
   try {
     const body = await readJsonBody(request);
     const question = normalizeSearchQuestion(body.question ?? body.query ?? body.message);
-    const topK = normalizeTopK(body.topK);
+    const resultCount = normalizeResultCount(body.topK);
 
     const embedding = await env.AI.run(EMBEDDING_MODEL, {
       text: [question],
@@ -25,13 +29,13 @@ export async function POST(request: Request) {
     const vector = coerceEmbeddingVector(embedding);
     const matches = await env.FYI_VECTORS.query(vector, {
       returnMetadata: "all",
-      topK,
+      topK: VECTORIZE_CANDIDATE_COUNT,
     });
-    const citations = matches.matches
+    const candidates = matches.matches
       .map(mapVectorizeMatchToCitation)
       .filter((citation) => citation.snippet || citation.requestUrl || citation.sourceUrl);
 
-    if (citations.length === 0) {
+    if (candidates.length === 0) {
       return jsonResponse({
         answer:
           "I could not find a strong matching record in the current Sunlight search index.",
@@ -40,6 +44,7 @@ export async function POST(request: Request) {
       });
     }
 
+    const citations = await rerankSearchCandidates(question, candidates, resultCount);
     const answerResult = await env.AI.run(ANSWER_MODEL, {
       max_completion_tokens: 700,
       messages: [
@@ -89,11 +94,30 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown>> 
   }
 }
 
-function normalizeTopK(value: unknown): number {
+function normalizeResultCount(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_TOP_K;
+    return DEFAULT_RESULT_COUNT;
   }
-  return Math.min(MAX_TOP_K, Math.max(1, Math.floor(value)));
+  return Math.min(MAX_RESULT_COUNT, Math.max(1, Math.floor(value)));
+}
+
+async function rerankSearchCandidates(
+  question: string,
+  candidates: ReturnType<typeof mapVectorizeMatchToCitation>[],
+  resultCount: number,
+) {
+  try {
+    const rerankResult = await env.AI.run(RERANK_MODEL, {
+      contexts: buildRerankContexts(candidates),
+      query: question,
+      top_k: Math.min(resultCount, candidates.length),
+    });
+
+    return rerankCitations(candidates, rerankResult, resultCount);
+  } catch (error) {
+    console.warn("Sunlight search reranker failed; falling back to Vectorize order", error);
+    return rerankCitations(candidates, undefined, resultCount);
+  }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

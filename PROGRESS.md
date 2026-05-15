@@ -184,6 +184,14 @@ Completed:
   enabled for local `wrangler dev` checks.
 * Deployed the search-enabled landing Worker to `sunlight.nz` and verified the
   live `/search` page plus `/api/search` answer path.
+* Added a BGE reranking pass to landing search:
+  * query Vectorize for 20 candidates
+  * rerank the candidate snippets with `@cf/baai/bge-reranker-base`
+  * answer from the top 5 reranked citations
+  * preserve both rerank and Vectorize scores in API citations
+* Added `docs/SEARCH.md` with the current search path, BM25/D1 hybrid plan,
+  AI Search alternative, LlamaIndex decision, and AI SDK/Gateway migration notes.
+* Deployed the reranker-enabled landing Worker to `sunlight.nz`.
 
 ## Verification
 
@@ -222,6 +230,9 @@ pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets a
 curl -I https://sunlight.nz/search
 curl -s https://sunlight.nz/search | rg -o "Search Sunlight|Search the disclosure archive"
 curl -s -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?","topK":1}'
+curl -s -X POST http://127.0.0.1:8787/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?"}'
+pnpm dlx wrangler@latest deploy apps/landing/dist/server/ssr/index.js --assets apps/landing/dist/client --config apps/landing/wrangler.jsonc
+curl -s -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?"}'
 pnpm exec wrangler deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --dry-run --config apps/admin/wrangler.jsonc
 pnpm dlx wrangler@latest deploy apps/admin/dist/server/ssr/index.js --assets apps/admin/dist/client --config apps/admin/wrangler.jsonc
 pnpm exec wrangler deploy apps/authority/dist/server/ssr/index.js --assets apps/authority/dist/client --dry-run --config apps/authority/wrangler.jsonc
@@ -271,11 +282,15 @@ Important naming boundary:
 1. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-2. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+2. Implement the D1 FTS5 BM25 sidecar described in `docs/SEARCH.md`, then fuse
+   Vectorize and BM25 candidates before BGE reranking.
+3. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-3. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+4. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-4. Do a controlled live Cloudflare Email Sending test before sending to real
+5. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+   can be sent as structured stream data instead of one JSON response.
+6. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-5. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+7. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.

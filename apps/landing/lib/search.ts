@@ -19,10 +19,12 @@ export interface SearchCitation {
   originalFilename?: string;
   requestUrl?: string;
   requestYear?: number;
+  rerankScore?: number;
   score: number;
   snippet: string;
   sourceUrl?: string;
   title: string;
+  vectorScore?: number;
 }
 
 interface VectorizeLikeMatch {
@@ -122,6 +124,44 @@ Sources:
 ${sources}
 
 Write a concise answer grounded only in the sources above. Cite claims with bracketed source numbers like [1]. If the sources are not enough to answer, say what the sources show and what remains unclear.`;
+}
+
+export function buildRerankContexts(citations: SearchCitation[]): { text: string }[] {
+  return citations.map((citation) => {
+    const parts = [
+      `Title: ${citation.title}`,
+      citation.authorityName ? `Authority: ${citation.authorityName}` : undefined,
+      citation.requestYear ? `Request year: ${citation.requestYear}` : undefined,
+      `Snippet: ${citation.snippet || "No preview available."}`,
+    ].filter((part): part is string => Boolean(part));
+
+    return { text: parts.join("\n") };
+  });
+}
+
+export function rerankCitations(
+  citations: SearchCitation[],
+  rerankResult: unknown,
+  topK: number,
+): SearchCitation[] {
+  const scored = parseRerankScores(rerankResult)
+    .flatMap(({ index, score }) => {
+      const citation = citations[index];
+      if (!citation) {
+        return [];
+      }
+
+      return [{
+        ...citation,
+        rerankScore: roundScore(score),
+        score: roundScore(score),
+        vectorScore: citation.score,
+      }];
+    })
+    .sort((left, right) => right.score - left.score);
+
+  const ranked = scored.length > 0 ? scored : citations;
+  return relabelCitations(ranked.slice(0, topK));
 }
 
 export function extractAnswerText(value: unknown): string {
@@ -245,4 +285,31 @@ function readHttpUrl(record: Record<string, unknown>, key: string): string | und
 
 function roundScore(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function parseRerankScores(value: unknown): { index: number; score: number }[] {
+  if (!isRecord(value) || !Array.isArray(value.response)) {
+    return [];
+  }
+
+  return value.response.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+
+    const index = readNumber(item, "id");
+    const score = readNumber(item, "score");
+    if (index === undefined || score === undefined) {
+      return [];
+    }
+
+    return [{ index, score }];
+  });
+}
+
+function relabelCitations(citations: SearchCitation[]): SearchCitation[] {
+  return citations.map((citation, index) => ({
+    ...citation,
+    label: `Source ${index + 1}`,
+  }));
 }
