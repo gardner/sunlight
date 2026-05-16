@@ -230,6 +230,17 @@ Completed:
   `storage/evals/search/local-lancedb-20`; the initial result was vector
   recall@50 `1.000`, vector MRR@50 `0.952`, final reranked recall@5 `0.850`,
   and final reranked MRR@5 `0.779`.
+* Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
+  Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
+  FYI request metadata, a dataset card, export manifest, record index, and
+  optional upload support.
+* Added full snapshot mode for replacing the current Hugging Face dataset and
+  append-safe delta mode for adding new content-addressed records over time.
+* Included legacy markdown files that predate provenance frontmatter by using
+  stable path-derived document ids and empty `frontmatter_json` metadata.
+* Built the current local full dataset at
+  `storage/huggingface/sunlight-fyi-markdown`: 11,704 rows, 12 Parquet shards,
+  and about 55 MB.
 
 ## Verification
 
@@ -322,6 +333,11 @@ uv run python scripts/eval_search.py --limit 1 --no-rerank --output-dir /tmp/sun
 uv run python scripts/eval_search.py --limit 1 --output-dir /tmp/sunlight-eval-smoke-rerank --device cuda
 uv run python scripts/eval_search.py --output-dir storage/evals/search/local-lancedb-20 --device cuda
 cat storage/evals/search/local-lancedb-20/report.md
+uv run python -m unittest tests/test_export_hf_markdown_dataset.py
+uv run pre-commit run --files scripts/export_hf_markdown_dataset.py tests/test_export_hf_markdown_dataset.py
+uv run python scripts/export_hf_markdown_dataset.py --limit 5 --output-dir /tmp/sunlight-hf-smoke --force
+uv run python scripts/export_hf_markdown_dataset.py --output-dir storage/huggingface/sunlight-fyi-markdown --force
+uv run python -m unittest discover -s tests
 ```
 
 ## Notes
@@ -365,24 +381,29 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+1. Choose the Hugging Face dataset repo id, visibility, and license wording,
+   then publish with the exporter upload command.
+2. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+   stays living; use full snapshots by default and delta exports when append-only
+   updates are useful.
+3. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-2. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+4. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-3. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+5. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-4. Review and hand-correct the LLM-generated eval question manifest, especially
+6. Review and hand-correct the LLM-generated eval question manifest, especially
    numeric questions where the first prompt had the highest invalid-output rate.
-5. Add local BM25 to `scripts/eval_search.py` so the local eval can compare
+7. Add local BM25 to `scripts/eval_search.py` so the local eval can compare
    vector-only, BM25-only, hybrid fusion, and reranked hybrid runs.
-6. Add optional local vLLM answer generation and answer-grounding checks to the
+8. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-7. Add exact query response caching for `/api/search` to reduce repeated answer
+9. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-8. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+10. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-9. Do a controlled live Cloudflare Email Sending test before sending to real
+11. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-10. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+12. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
