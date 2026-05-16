@@ -221,6 +221,15 @@ Completed:
   search eval candidates from markdown excerpts and request metadata.
 * Generated the initial `manifests/fyi/v1/eval-questions.ndjson` seed set with
   20 unreviewed questions using local vLLM model `nvidia/Gemma-4-31B-IT-NVFP4`.
+* Added `scripts/eval_search.py` to run local retrieval evals against the
+  existing LanceDB backup at
+  `/mnt/dgx-ssd/src/sunlight_backup/storage/fyi_parallel.lancedb`, loading
+  `Qwen/Qwen3-Embedding-0.6B` for query embeddings and
+  `BAAI/bge-reranker-base` for reranking inside the eval process.
+* Ran the 20-question local LanceDB eval and wrote ignored outputs to
+  `storage/evals/search/local-lancedb-20`; the initial result was vector
+  recall@50 `1.000`, vector MRR@50 `0.952`, final reranked recall@5 `0.850`,
+  and final reranked MRR@5 `0.779`.
 
 ## Verification
 
@@ -308,6 +317,11 @@ print("answerable", dict(Counter(row["answerable"] for row in rows)))
 print("reviewed", dict(Counter(row["reviewed"] for row in rows)))
 print("unique_ids", len({row["id"] for row in rows}))
 PY
+uv run pre-commit run --files scripts/eval_search.py
+uv run python scripts/eval_search.py --limit 1 --no-rerank --output-dir /tmp/sunlight-eval-smoke --device cuda
+uv run python scripts/eval_search.py --limit 1 --output-dir /tmp/sunlight-eval-smoke-rerank --device cuda
+uv run python scripts/eval_search.py --output-dir storage/evals/search/local-lancedb-20 --device cuda
+cat storage/evals/search/local-lancedb-20/report.md
 ```
 
 ## Notes
@@ -360,14 +374,15 @@ Important naming boundary:
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
 4. Review and hand-correct the LLM-generated eval question manifest, especially
    numeric questions where the first prompt had the highest invalid-output rate.
-5. Build `scripts/eval_search.py` to run the pinned manifest against local
-   Qwen embeddings, LanceDB, local BM25, local BGE reranking, and optional local
-   vLLM answer generation.
-6. Add exact query response caching for `/api/search` to reduce repeated answer
+5. Add local BM25 to `scripts/eval_search.py` so the local eval can compare
+   vector-only, BM25-only, hybrid fusion, and reranked hybrid runs.
+6. Add optional local vLLM answer generation and answer-grounding checks to the
+   eval harness after retrieval metrics are stable.
+7. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-7. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+8. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-8. Do a controlled live Cloudflare Email Sending test before sending to real
+9. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-9. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+10. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
