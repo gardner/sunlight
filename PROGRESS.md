@@ -217,6 +217,10 @@ Completed:
   `sunlight-search`.
 * Added TypeScript coverage for search request validation and rate-limit bucket
   construction.
+* Added `scripts/generate_eval_questions.py` to create local LLM-generated FYI
+  search eval candidates from markdown excerpts and request metadata.
+* Generated the initial `manifests/fyi/v1/eval-questions.ndjson` seed set with
+  20 unreviewed questions using local vLLM model `nvidia/Gemma-4-31B-IT-NVFP4`.
 
 ## Verification
 
@@ -288,6 +292,22 @@ curl -s -o /tmp/sunlight_bad_content_type.json -w '%{http_code}\n' -X POST https
 node -e 'process.stdout.write(JSON.stringify({question:"x".repeat(5000)}))' | curl -s -o /tmp/sunlight_large_body.json -w '%{http_code}\n' -X POST https://sunlight.nz/api/search -H 'content-type: application/json' --data-binary @-
 ua="sunlight-rl-test-$(date +%s)"; for i in $(seq 1 13); do curl -s -o /tmp/sunlight_rate_limit.json -w '%{http_code} ' -A "$ua" -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{'; done
 curl -s -A "sunlight-normal-smoke-$(date +%s)" -X POST https://sunlight.nz/api/search -H 'content-type: application/json' -d '{"question":"What information was released about council leisure centre contracts?","topK":1}'
+curl -s http://127.0.0.1:8000/v1/models | jq '.data[] | {id}'
+uv run python scripts/generate_eval_questions.py --help
+uv run pre-commit run --files scripts/generate_eval_questions.py
+uv run python scripts/generate_eval_questions.py --count 2 --output /tmp/sunlight-eval-smoke.ndjson --force
+uv run python scripts/generate_eval_questions.py --count 20 --output manifests/fyi/v1/eval-questions.ndjson --force
+uv run python - <<'PY'
+import json
+from collections import Counter
+from pathlib import Path
+rows = [json.loads(line) for line in Path("manifests/fyi/v1/eval-questions.ndjson").read_text(encoding="utf-8").splitlines() if line.strip()]
+print("rows", len(rows))
+print("kinds", dict(Counter(row["kind"] for row in rows)))
+print("answerable", dict(Counter(row["answerable"] for row in rows)))
+print("reviewed", dict(Counter(row["reviewed"] for row in rows)))
+print("unique_ids", len({row["id"] for row in rows}))
+PY
 ```
 
 ## Notes
@@ -338,13 +358,16 @@ Important naming boundary:
    run the first eval set against both pipelines.
 3. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-4. Build a small RAG eval set covering exact-term, semantic, numeric, live-log
-   failure, and no-answer queries before tuning hybrid weights.
-5. Add exact query response caching for `/api/search` to reduce repeated answer
+4. Review and hand-correct the LLM-generated eval question manifest, especially
+   numeric questions where the first prompt had the highest invalid-output rate.
+5. Build `scripts/eval_search.py` to run the pinned manifest against local
+   Qwen embeddings, LanceDB, local BM25, local BGE reranking, and optional local
+   vLLM answer generation.
+6. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-6. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+7. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-7. Do a controlled live Cloudflare Email Sending test before sending to real
+8. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-8. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+9. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
