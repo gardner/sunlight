@@ -159,7 +159,7 @@ def iter_dataset_rows(
         try:
             metadata, body = parse_markdown_document(raw_text)
         except Exception:
-            metadata, body = {}, raw_text
+            continue
         if not body.strip():
             continue
 
@@ -364,10 +364,6 @@ Each row contains:
 - authority metadata when available
 - original filename and planned R2 keys
 - `frontmatter_json`: original Markdown frontmatter from the conversion pipeline
-
-Older Markdown files that predate provenance frontmatter are still included.
-Those rows use a stable path-derived `document_id` and an empty
-`frontmatter_json` object.
 
 ## Living Dataset Updates
 

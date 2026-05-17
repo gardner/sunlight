@@ -236,11 +236,14 @@ Completed:
   optional upload support.
 * Added full snapshot mode for replacing the current Hugging Face dataset and
   append-safe delta mode for adding new content-addressed records over time.
-* Included legacy markdown files that predate provenance frontmatter by using
-  stable path-derived document ids and empty `frontmatter_json` metadata.
+* Deleted 2,039 duplicate legacy markdown files that predated provenance
+  frontmatter after confirming each had a deterministic `__<hash>.md`
+  replacement.
+* Updated the Hugging Face exporter to skip frontmatterless markdown files so
+  dataset rows always carry provenance metadata.
 * Built the current local full dataset at
-  `storage/huggingface/sunlight-fyi-markdown`: 11,704 rows, 12 Parquet shards,
-  and about 55 MB.
+  `storage/huggingface/sunlight-fyi-markdown`: 9,665 rows, 10 Parquet shards,
+  and about 54 MB.
 
 ## Verification
 

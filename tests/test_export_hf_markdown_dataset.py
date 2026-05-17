@@ -116,7 +116,7 @@ class HuggingFaceMarkdownDatasetTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
 
-    def test_iter_dataset_rows_includes_frontmatterless_markdown(self):
+    def test_iter_dataset_rows_skips_frontmatterless_markdown(self):
         with tempfile.TemporaryDirectory() as tmp:
             markdown_dir = Path(tmp) / "markdown"
             markdown_dir.mkdir()
@@ -129,11 +129,7 @@ class HuggingFaceMarkdownDatasetTests(unittest.TestCase):
             )
             rows = list(exporter.iter_dataset_rows(args, {}, EXPORTED_AT, set()))
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["markdown_content"], body)
-        self.assertEqual(rows[0]["frontmatter_json"], "{}")
-        self.assertEqual(rows[0]["markdown_filename"], "legacy.pdf.md")
-        self.assertTrue(rows[0]["document_id"].startswith("doc_local_"))
+        self.assertEqual(rows, [])
 
     def test_write_parquet_shards_and_record_index(self):
         row = exporter.build_row(
