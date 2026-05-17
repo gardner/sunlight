@@ -244,6 +244,9 @@ Completed:
 * Built the current local full dataset at
   `storage/huggingface/sunlight-fyi-markdown`: 9,665 rows, 10 Parquet shards,
   and about 54 MB.
+* Added `docs/DATASET.md` with the Hugging Face dataset plan, schema, source of
+  truth, full and delta publishing workflows, living dataset update loop,
+  validation gates, responsible-use notes, and open release decisions.
 
 ## Verification
 
@@ -341,6 +344,7 @@ uv run pre-commit run --files scripts/export_hf_markdown_dataset.py tests/test_e
 uv run python scripts/export_hf_markdown_dataset.py --limit 5 --output-dir /tmp/sunlight-hf-smoke --force
 uv run python scripts/export_hf_markdown_dataset.py --output-dir storage/huggingface/sunlight-fyi-markdown --force
 uv run python -m unittest discover -s tests
+uv run pre-commit run --files docs/DATASET.md PROGRESS.md
 ```
 
 ## Notes
