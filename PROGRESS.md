@@ -230,6 +230,10 @@ Completed:
   `storage/evals/search/local-lancedb-20`; the initial result was vector
   recall@50 `1.000`, vector MRR@50 `0.952`, final reranked recall@5 `0.850`,
   and final reranked MRR@5 `0.779`.
+* Enhanced `scripts/eval_search.py` reports with per-question-kind and
+  answerability metric breakdowns, plus stage-regression callouts for questions
+  where first-stage retrieval found the expected document but final selection
+  lost it.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
@@ -335,6 +339,7 @@ print("reviewed", dict(Counter(row["reviewed"] for row in rows)))
 print("unique_ids", len({row["id"] for row in rows}))
 PY
 uv run pre-commit run --files scripts/eval_search.py
+uv run python -m unittest tests/test_eval_search.py
 uv run python scripts/eval_search.py --limit 1 --no-rerank --output-dir /tmp/sunlight-eval-smoke --device cuda
 uv run python scripts/eval_search.py --limit 1 --output-dir /tmp/sunlight-eval-smoke-rerank --device cuda
 uv run python scripts/eval_search.py --output-dir storage/evals/search/local-lancedb-20 --device cuda

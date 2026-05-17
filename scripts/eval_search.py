@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 DEFAULT_QUESTIONS = Path("manifests/fyi/v1/eval-questions.ndjson")
@@ -340,10 +340,29 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         f"* Final recall@{args.final_k}: {mean_bool(results, 'final_hit'):.3f}",
         f"* Final MRR@{args.final_k}: {mean_value(results, 'final_mrr'):.3f}",
         "",
-        "## Question Types",
+        "## Metrics By Question Type",
         "",
     ]
+    lines.extend(render_grouped_metrics(results, question_kind_group, args))
+    lines.extend([
+        "",
+        "## Metrics By Answerability",
+        "",
+    ])
+    lines.extend(render_grouped_metrics(results, answerability_group, args))
+    lines.extend([
+        "",
+        "## Question Types",
+        "",
+    ])
     lines.extend(f"* {kind}: {count}" for kind, count in sorted(by_kind.items()))
+    lines.extend(["", "## Stage Regressions", ""])
+    regressions = stage_regressions(results)
+    if not regressions:
+        lines.append("No first-stage retrieval hits were lost by final selection.")
+    else:
+        for row in regressions:
+            lines.append(f"* `{row['id']}` {row['question']}")
     lines.extend(["", "## Misses", ""])
     misses = [row for row in results if not row["final_hit"]]
     if not misses:
@@ -353,6 +372,54 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
             lines.append(f"* `{row['id']}` {row['question']}")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_grouped_metrics(
+    rows: list[dict[str, Any]],
+    group_key: Callable[[dict[str, Any]], str],
+    args: argparse.Namespace,
+) -> list[str]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(group_key(row), []).append(row)
+
+    lines = [
+        (
+            f"| Group | Questions | Vector Recall@{args.top_k} | "
+            f"Final Recall@{args.final_k} | Vector MRR@{args.top_k} | "
+            f"Final MRR@{args.final_k} |"
+        ),
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for group, group_rows in sorted(groups.items()):
+        lines.append(
+            f"| {group} | {len(group_rows)} | "
+            f"{mean_bool(group_rows, 'vector_hit_at_top_k'):.3f} | "
+            f"{mean_bool(group_rows, 'final_hit'):.3f} | "
+            f"{mean_value(group_rows, 'vector_mrr_at_top_k'):.3f} | "
+            f"{mean_value(group_rows, 'final_mrr'):.3f} |"
+        )
+    return lines
+
+
+def question_kind_group(row: dict[str, Any]) -> str:
+    return str(row.get("kind") or "unknown")
+
+
+def answerability_group(row: dict[str, Any]) -> str:
+    if row.get("answerable") is True:
+        return "answerable"
+    if row.get("answerable") is False:
+        return "not_answerable"
+    return "unknown"
+
+
+def stage_regressions(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in results
+        if row.get("vector_hit_at_top_k") and not row.get("final_hit")
+    ]
 
 
 def mean_bool(rows: list[dict[str, Any]], key: str) -> float:
