@@ -234,6 +234,10 @@ Completed:
   answerability metric breakdowns, plus stage-regression callouts for questions
   where first-stage retrieval found the expected document but final selection
   lost it.
+* Reviewed and hand-corrected all 20 rows in
+  `manifests/fyi/v1/eval-questions.ndjson`, tightening ambiguous question
+  wording and verifying every supporting passage resolves to the referenced
+  local FYI markdown document.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
@@ -338,6 +342,29 @@ print("answerable", dict(Counter(row["answerable"] for row in rows)))
 print("reviewed", dict(Counter(row["reviewed"] for row in rows)))
 print("unique_ids", len({row["id"] for row in rows}))
 PY
+uv run python - <<'PY'
+import json
+import re
+from pathlib import Path
+rows = [json.loads(line) for line in Path("manifests/fyi/v1/eval-questions.ndjson").read_text(encoding="utf-8").splitlines() if line.strip()]
+base = Path("fyi/markdown")
+def find_doc(doc_id):
+    suffix = doc_id.rsplit("_", 1)[-1]
+    for path in base.glob(f"*__{suffix}.md"):
+        if doc_id in path.read_text(encoding="utf-8", errors="replace")[:4000]:
+            return path
+    raise FileNotFoundError(doc_id)
+def norm(text):
+    return re.sub(r"\s+", " ", text.lower()).strip()
+def compact(text):
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+bad = []
+for row in rows:
+    text = find_doc(row["document_id"]).read_text(encoding="utf-8", errors="replace")
+    if norm(row["supporting_passage"]) not in norm(text) and compact(row["supporting_passage"]) not in compact(text):
+        bad.append(row["id"])
+print("rows", len(rows), "reviewed", sum(row.get("reviewed") is True for row in rows), "bad_support", bad)
+PY
 uv run pre-commit run --files scripts/eval_search.py
 uv run python -m unittest tests/test_eval_search.py
 uv run python scripts/eval_search.py --limit 1 --no-rerank --output-dir /tmp/sunlight-eval-smoke --device cuda
@@ -405,8 +432,8 @@ Important naming boundary:
    run the first eval set against both pipelines.
 5. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-6. Review and hand-correct the LLM-generated eval question manifest, especially
-   numeric questions where the first prompt had the highest invalid-output rate.
+6. Expand the reviewed eval manifest beyond 20 questions, especially with live
+   failure cases and more numeric/table-heavy FYI records.
 7. Add local BM25 to `scripts/eval_search.py` so the local eval can compare
    vector-only, BM25-only, hybrid fusion, and reranked hybrid runs.
 8. Add optional local vLLM answer generation and answer-grounding checks to the
