@@ -5,12 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
+
+from eval_search_bm25 import (
+    DEFAULT_BM25_BATCH_SIZE,
+    DEFAULT_BM25_DB,
+    LocalBm25Index,
+    fuse_search_results,
+    open_or_build_bm25_index,
+)
 
 
 DEFAULT_QUESTIONS = Path("manifests/fyi/v1/eval-questions.ndjson")
@@ -23,7 +30,6 @@ DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-base"
 DEFAULT_TOP_K = 50
 DEFAULT_RERANK_TOP_K = 20
 DEFAULT_FINAL_K = 5
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -38,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     parser.add_argument("--rerank-top-k", type=int, default=DEFAULT_RERANK_TOP_K)
     parser.add_argument("--final-k", type=int, default=DEFAULT_FINAL_K)
+    parser.add_argument("--bm25-db", type=Path, default=DEFAULT_BM25_DB)
+    parser.add_argument("--bm25-batch-size", type=int, default=DEFAULT_BM25_BATCH_SIZE)
+    parser.add_argument("--rebuild-bm25", action="store_true")
+    parser.add_argument("--no-bm25", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--no-rerank", action="store_true")
@@ -54,6 +64,14 @@ def main() -> int:
     rows = read_questions(args.questions, args.limit)
     table = open_lancedb_table(args.lancedb_uri, args.table)
     covered_rows = annotate_corpus_coverage(table, rows)
+    bm25_index = None
+    if not args.no_bm25:
+        bm25_index = open_or_build_bm25_index(
+            table,
+            args.bm25_db,
+            args.bm25_batch_size,
+            args.rebuild_bm25,
+        )
 
     device = resolve_device(args.device)
     embedder = load_embedder(args.embed_model, device)
@@ -62,7 +80,7 @@ def main() -> int:
     results = []
     for index, row in enumerate(covered_rows, start=1):
         print(f"Evaluating {index}/{len(covered_rows)} {row['id']}: {row['question']}", flush=True)
-        results.append(evaluate_question(row, table, embedder, reranker, args))
+        results.append(evaluate_question(row, table, embedder, reranker, args, bm25_index))
 
     write_outputs(output_dir, results, args)
     print(f"Wrote eval results to {output_dir}", flush=True)
@@ -76,6 +94,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit(f"LanceDB path not found: {args.lancedb_uri}")
     if args.top_k < 1 or args.rerank_top_k < 1 or args.final_k < 1:
         raise SystemExit("top-k values must be positive")
+    if args.bm25_batch_size < 1:
+        raise SystemExit("--bm25-batch-size must be positive")
     if args.rerank_top_k > args.top_k:
         raise SystemExit("--rerank-top-k cannot exceed --top-k")
     if args.final_k > args.rerank_top_k:
@@ -184,24 +204,39 @@ def load_reranker(model_name: str, device: str):
     return CrossEncoder(model_name, device=device)
 
 
-def evaluate_question(row: dict[str, Any], table, embedder, reranker, args: argparse.Namespace) -> dict[str, Any]:
+def evaluate_question(
+    row: dict[str, Any],
+    table,
+    embedder,
+    reranker,
+    args: argparse.Namespace,
+    bm25_index: LocalBm25Index | None = None,
+) -> dict[str, Any]:
     started = time.perf_counter()
     embedding_started = time.perf_counter()
     vector = embedder.get_query_embedding(row["question"])
     embedding_ms = elapsed_ms(embedding_started)
 
-    retrieval_started = time.perf_counter()
+    vector_started = time.perf_counter()
     vector_results = search_lancedb(table, vector, args.top_k)
-    retrieval_ms = elapsed_ms(retrieval_started)
+    vector_ms = elapsed_ms(vector_started)
+
+    bm25_started = time.perf_counter()
+    bm25_results = bm25_index.search(row["question"], args.top_k) if bm25_index else []
+    bm25_ms = elapsed_ms(bm25_started)
+
+    fusion_started = time.perf_counter()
+    hybrid_results = fuse_search_results(vector_results, bm25_results, args.top_k)
+    fusion_ms = elapsed_ms(fusion_started)
 
     rerank_results = []
     rerank_ms = 0
     if reranker is not None:
         rerank_started = time.perf_counter()
-        rerank_results = rerank(row["question"], vector_results[: args.rerank_top_k], reranker)
+        rerank_results = rerank(row["question"], hybrid_results[: args.rerank_top_k], reranker)
         rerank_ms = elapsed_ms(rerank_started)
 
-    final_results = (rerank_results or vector_results)[: args.final_k]
+    final_results = (rerank_results or hybrid_results)[: args.final_k]
     return {
         "answerable": row.get("answerable"),
         "corpus_document_rows": row["corpus_document_rows"],
@@ -214,14 +249,23 @@ def evaluate_question(row: dict[str, Any], table, embedder, reranker, args: argp
         "id": row["id"],
         "kind": row.get("kind"),
         "question": row["question"],
+        "bm25_hit_at_top_k": has_hit(bm25_results, row),
+        "bm25_mrr_at_top_k": reciprocal_rank(bm25_results, row),
+        "bm25_top_k": compact_results(bm25_results),
+        "hybrid_hit_at_top_k": has_hit(hybrid_results, row),
+        "hybrid_mrr_at_top_k": reciprocal_rank(hybrid_results, row),
+        "hybrid_top_k": compact_results(hybrid_results),
         "rerank_hit_at_final_k": has_hit((rerank_results or [])[: args.final_k], row),
         "rerank_mrr_at_final_k": reciprocal_rank((rerank_results or [])[: args.final_k], row),
         "rerank_top_k": compact_results((rerank_results or [])[: args.rerank_top_k]),
         "timings_ms": {
+            "bm25_retrieval": bm25_ms,
             "embedding": embedding_ms,
-            "retrieval": retrieval_ms,
+            "fusion": fusion_ms,
+            "retrieval": vector_ms + bm25_ms + fusion_ms,
             "rerank": rerank_ms,
             "total": elapsed_ms(started),
+            "vector_retrieval": vector_ms,
         },
         "vector_hit_at_top_k": has_hit(vector_results, row),
         "vector_mrr_at_top_k": reciprocal_rank(vector_results, row),
@@ -245,6 +289,7 @@ def normalize_result(row: dict[str, Any], rank: int) -> dict[str, Any]:
         "request_url": row.get("request_url"),
         "source_url": row.get("source_url"),
         "text_preview": row.get("text_preview"),
+        "vector_rank": rank,
     }
 
 
@@ -296,9 +341,14 @@ def compact_results(results: list[dict[str, Any]], keep: int = 10) -> list[dict[
             for key in (
                 "rank",
                 "rerank_rank",
+                "vector_rank",
+                "bm25_rank",
                 "document_id",
                 "chunk_id",
                 "distance",
+                "vector_score",
+                "bm25_score",
+                "fused_score",
                 "rerank_score",
                 "request_url",
                 "original_filename",
@@ -335,6 +385,10 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         "",
         f"* Vector recall@{args.top_k}: {mean_bool(results, 'vector_hit_at_top_k'):.3f}",
         f"* Vector MRR@{args.top_k}: {mean_value(results, 'vector_mrr_at_top_k'):.3f}",
+        f"* BM25 recall@{args.top_k}: {mean_bool(results, 'bm25_hit_at_top_k'):.3f}",
+        f"* BM25 MRR@{args.top_k}: {mean_value(results, 'bm25_mrr_at_top_k'):.3f}",
+        f"* Hybrid recall@{args.top_k}: {mean_bool(results, 'hybrid_hit_at_top_k'):.3f}",
+        f"* Hybrid MRR@{args.top_k}: {mean_value(results, 'hybrid_mrr_at_top_k'):.3f}",
         f"* Rerank recall@{args.final_k}: {mean_bool(results, 'rerank_hit_at_final_k'):.3f}",
         f"* Rerank MRR@{args.final_k}: {mean_value(results, 'rerank_mrr_at_final_k'):.3f}",
         f"* Final recall@{args.final_k}: {mean_bool(results, 'final_hit'):.3f}",
@@ -386,17 +440,23 @@ def render_grouped_metrics(
     lines = [
         (
             f"| Group | Questions | Vector Recall@{args.top_k} | "
+            f"BM25 Recall@{args.top_k} | Hybrid Recall@{args.top_k} | "
             f"Final Recall@{args.final_k} | Vector MRR@{args.top_k} | "
+            f"BM25 MRR@{args.top_k} | Hybrid MRR@{args.top_k} | "
             f"Final MRR@{args.final_k} |"
         ),
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for group, group_rows in sorted(groups.items()):
         lines.append(
             f"| {group} | {len(group_rows)} | "
             f"{mean_bool(group_rows, 'vector_hit_at_top_k'):.3f} | "
+            f"{mean_bool(group_rows, 'bm25_hit_at_top_k'):.3f} | "
+            f"{mean_bool(group_rows, 'hybrid_hit_at_top_k'):.3f} | "
             f"{mean_bool(group_rows, 'final_hit'):.3f} | "
             f"{mean_value(group_rows, 'vector_mrr_at_top_k'):.3f} | "
+            f"{mean_value(group_rows, 'bm25_mrr_at_top_k'):.3f} | "
+            f"{mean_value(group_rows, 'hybrid_mrr_at_top_k'):.3f} | "
             f"{mean_value(group_rows, 'final_mrr'):.3f} |"
         )
     return lines
@@ -418,7 +478,7 @@ def stage_regressions(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         row
         for row in results
-        if row.get("vector_hit_at_top_k") and not row.get("final_hit")
+        if row.get("hybrid_hit_at_top_k") and not row.get("final_hit")
     ]
 
 

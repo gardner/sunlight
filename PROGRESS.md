@@ -238,6 +238,9 @@ Completed:
   `manifests/fyi/v1/eval-questions.ndjson`, tightening ambiguous question
   wording and verifying every supporting passage resolves to the referenced
   local FYI markdown document.
+* Added local SQLite FTS5 BM25 support to `scripts/eval_search.py` via
+  `scripts/eval_search_bm25.py`, so the local harness now reports vector-only,
+  BM25-only, hybrid RRF, and reranked hybrid retrieval metrics.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
@@ -367,6 +370,8 @@ print("rows", len(rows), "reviewed", sum(row.get("reviewed") is True for row in 
 PY
 uv run pre-commit run --files scripts/eval_search.py
 uv run python -m unittest tests/test_eval_search.py
+uv run pre-commit run --files scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
+uv run python -m py_compile scripts/eval_search.py scripts/eval_search_bm25.py
 uv run python scripts/eval_search.py --limit 1 --no-rerank --output-dir /tmp/sunlight-eval-smoke --device cuda
 uv run python scripts/eval_search.py --limit 1 --output-dir /tmp/sunlight-eval-smoke-rerank --device cuda
 uv run python scripts/eval_search.py --output-dir storage/evals/search/local-lancedb-20 --device cuda
@@ -432,10 +437,11 @@ Important naming boundary:
    run the first eval set against both pipelines.
 5. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-6. Expand the reviewed eval manifest beyond 20 questions, especially with live
+6. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+   to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
+   reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
+7. Expand the reviewed eval manifest beyond 20 questions, especially with live
    failure cases and more numeric/table-heavy FYI records.
-7. Add local BM25 to `scripts/eval_search.py` so the local eval can compare
-   vector-only, BM25-only, hybrid fusion, and reranked hybrid runs.
 8. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
 9. Add exact query response caching for `/api/search` to reduce repeated answer
