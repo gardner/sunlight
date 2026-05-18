@@ -30,6 +30,12 @@ DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-base"
 DEFAULT_TOP_K = 50
 DEFAULT_RERANK_TOP_K = 20
 DEFAULT_FINAL_K = 5
+DEFAULT_RETRIEVAL_CUTOFFS = (5, 10, 20)
+RETRIEVAL_STAGES = (
+    ("vector", "Vector"),
+    ("bm25", "BM25"),
+    ("hybrid", "Hybrid"),
+)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -213,6 +219,8 @@ def evaluate_question(
     bm25_index: LocalBm25Index | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    retrieval_cutoffs = metric_cutoffs(args.top_k)
+    rerank_cutoffs = metric_cutoffs(args.rerank_top_k, defaults=(args.final_k,))
     embedding_started = time.perf_counter()
     vector = embedder.get_query_embedding(row["question"])
     embedding_ms = elapsed_ms(embedding_started)
@@ -237,6 +245,10 @@ def evaluate_question(
         rerank_ms = elapsed_ms(rerank_started)
 
     final_results = (rerank_results or hybrid_results)[: args.final_k]
+    vector_metrics = stage_metrics("vector", vector_results, row, retrieval_cutoffs)
+    bm25_metrics = stage_metrics("bm25", bm25_results, row, retrieval_cutoffs)
+    hybrid_metrics = stage_metrics("hybrid", hybrid_results, row, retrieval_cutoffs)
+    rerank_metrics = stage_metrics("rerank", rerank_results, row, rerank_cutoffs)
     return {
         "answerable": row.get("answerable"),
         "corpus_document_rows": row["corpus_document_rows"],
@@ -249,14 +261,14 @@ def evaluate_question(
         "id": row["id"],
         "kind": row.get("kind"),
         "question": row["question"],
-        "bm25_hit_at_top_k": has_hit(bm25_results, row),
-        "bm25_mrr_at_top_k": reciprocal_rank(bm25_results, row),
+        "bm25_hit_at_top_k": bm25_metrics[f"bm25_hit_at_{args.top_k}"],
+        "bm25_mrr_at_top_k": bm25_metrics[f"bm25_mrr_at_{args.top_k}"],
         "bm25_top_k": compact_results(bm25_results),
-        "hybrid_hit_at_top_k": has_hit(hybrid_results, row),
-        "hybrid_mrr_at_top_k": reciprocal_rank(hybrid_results, row),
+        "hybrid_hit_at_top_k": hybrid_metrics[f"hybrid_hit_at_{args.top_k}"],
+        "hybrid_mrr_at_top_k": hybrid_metrics[f"hybrid_mrr_at_{args.top_k}"],
         "hybrid_top_k": compact_results(hybrid_results),
-        "rerank_hit_at_final_k": has_hit((rerank_results or [])[: args.final_k], row),
-        "rerank_mrr_at_final_k": reciprocal_rank((rerank_results or [])[: args.final_k], row),
+        "rerank_hit_at_final_k": rerank_metrics[f"rerank_hit_at_{args.final_k}"],
+        "rerank_mrr_at_final_k": rerank_metrics[f"rerank_mrr_at_{args.final_k}"],
         "rerank_top_k": compact_results((rerank_results or [])[: args.rerank_top_k]),
         "timings_ms": {
             "bm25_retrieval": bm25_ms,
@@ -267,9 +279,13 @@ def evaluate_question(
             "total": elapsed_ms(started),
             "vector_retrieval": vector_ms,
         },
-        "vector_hit_at_top_k": has_hit(vector_results, row),
-        "vector_mrr_at_top_k": reciprocal_rank(vector_results, row),
+        "vector_hit_at_top_k": vector_metrics[f"vector_hit_at_{args.top_k}"],
+        "vector_mrr_at_top_k": vector_metrics[f"vector_mrr_at_{args.top_k}"],
         "vector_top_k": compact_results(vector_results),
+        **bm25_metrics,
+        **hybrid_metrics,
+        **rerank_metrics,
+        **vector_metrics,
     }
 
 
@@ -333,6 +349,24 @@ def reciprocal_rank(results: list[dict[str, Any]], row: dict[str, Any]) -> float
     return 0
 
 
+def metric_cutoffs(max_k: int, defaults: tuple[int, ...] = DEFAULT_RETRIEVAL_CUTOFFS) -> list[int]:
+    return sorted({cutoff for cutoff in (*defaults, max_k) if 0 < cutoff <= max_k})
+
+
+def stage_metrics(
+    stage: str,
+    results: list[dict[str, Any]],
+    row: dict[str, Any],
+    cutoffs: list[int],
+) -> dict[str, bool | float]:
+    metrics: dict[str, bool | float] = {}
+    for cutoff in cutoffs:
+        cutoff_results = results[:cutoff]
+        metrics[f"{stage}_hit_at_{cutoff}"] = has_hit(cutoff_results, row)
+        metrics[f"{stage}_mrr_at_{cutoff}"] = reciprocal_rank(cutoff_results, row)
+    return metrics
+
+
 def compact_results(results: list[dict[str, Any]], keep: int = 10) -> list[dict[str, Any]]:
     compact = []
     for result in results[:keep]:
@@ -369,13 +403,14 @@ def write_outputs(output_dir: Path, results: list[dict[str, Any]], args: argpars
 
 
 def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> str:
-    covered = [row for row in results if row["corpus_document_rows"] > 0]
+    covered = covered_results(results)
     by_kind = Counter(row.get("kind") or "unknown" for row in results)
     lines = [
         "# Search Eval Report",
         "",
         f"Questions: {len(results)}",
         f"Covered expected documents: {len(covered)}/{len(results)}",
+        "Metrics below exclude corpus coverage gaps unless a section says otherwise.",
         f"LanceDB: `{args.lancedb_uri}`",
         f"Table: `{args.table}`",
         f"Embedding model: `{args.embed_model}`",
@@ -383,27 +418,33 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         "",
         "## Metrics",
         "",
-        f"* Vector recall@{args.top_k}: {mean_bool(results, 'vector_hit_at_top_k'):.3f}",
-        f"* Vector MRR@{args.top_k}: {mean_value(results, 'vector_mrr_at_top_k'):.3f}",
-        f"* BM25 recall@{args.top_k}: {mean_bool(results, 'bm25_hit_at_top_k'):.3f}",
-        f"* BM25 MRR@{args.top_k}: {mean_value(results, 'bm25_mrr_at_top_k'):.3f}",
-        f"* Hybrid recall@{args.top_k}: {mean_bool(results, 'hybrid_hit_at_top_k'):.3f}",
-        f"* Hybrid MRR@{args.top_k}: {mean_value(results, 'hybrid_mrr_at_top_k'):.3f}",
-        f"* Rerank recall@{args.final_k}: {mean_bool(results, 'rerank_hit_at_final_k'):.3f}",
-        f"* Rerank MRR@{args.final_k}: {mean_value(results, 'rerank_mrr_at_final_k'):.3f}",
-        f"* Final recall@{args.final_k}: {mean_bool(results, 'final_hit'):.3f}",
-        f"* Final MRR@{args.final_k}: {mean_value(results, 'final_mrr'):.3f}",
+        f"* Vector recall@{args.top_k}: {mean_bool(covered, 'vector_hit_at_top_k'):.3f}",
+        f"* Vector MRR@{args.top_k}: {mean_value(covered, 'vector_mrr_at_top_k'):.3f}",
+        f"* BM25 recall@{args.top_k}: {mean_bool(covered, 'bm25_hit_at_top_k'):.3f}",
+        f"* BM25 MRR@{args.top_k}: {mean_value(covered, 'bm25_mrr_at_top_k'):.3f}",
+        f"* Hybrid recall@{args.top_k}: {mean_bool(covered, 'hybrid_hit_at_top_k'):.3f}",
+        f"* Hybrid MRR@{args.top_k}: {mean_value(covered, 'hybrid_mrr_at_top_k'):.3f}",
+        f"* Rerank recall@{args.final_k}: {mean_bool(covered, 'rerank_hit_at_final_k'):.3f}",
+        f"* Rerank MRR@{args.final_k}: {mean_value(covered, 'rerank_mrr_at_final_k'):.3f}",
+        f"* Final recall@{args.final_k}: {mean_bool(covered, 'final_hit'):.3f}",
+        f"* Final MRR@{args.final_k}: {mean_value(covered, 'final_mrr'):.3f}",
+        "",
+        "## Retrieval Cutoff Metrics",
+        "",
+    ]
+    lines.extend(render_cutoff_metrics(covered, args))
+    lines.extend([
         "",
         "## Metrics By Question Type",
         "",
-    ]
-    lines.extend(render_grouped_metrics(results, question_kind_group, args))
+    ])
+    lines.extend(render_grouped_metrics(covered, question_kind_group, args))
     lines.extend([
         "",
         "## Metrics By Answerability",
         "",
     ])
-    lines.extend(render_grouped_metrics(results, answerability_group, args))
+    lines.extend(render_grouped_metrics(covered, answerability_group, args))
     lines.extend([
         "",
         "## Question Types",
@@ -420,14 +461,14 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
             suffix = f" Expected requests: {expected_requests}." if expected_requests else ""
             lines.append(f"* `{row['id']}` {row['question']}{suffix}")
     lines.extend(["", "## Stage Regressions", ""])
-    regressions = stage_regressions(results)
+    regressions = stage_regressions(covered)
     if not regressions:
         lines.append("No first-stage retrieval hits were lost by final selection.")
     else:
         for row in regressions:
             lines.append(f"* `{row['id']}` {row['question']}")
     lines.extend(["", "## Misses", ""])
-    misses = [row for row in results if not row["final_hit"]]
+    misses = [row for row in covered if not row["final_hit"]]
     if not misses:
         lines.append("No final-stage misses.")
     else:
@@ -435,6 +476,27 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
             lines.append(f"* `{row['id']}` {row['question']}")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_cutoff_metrics(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[str]:
+    cutoffs = metric_cutoffs(args.top_k)
+    metric_headers = " | ".join(
+        f"Recall@{cutoff} | MRR@{cutoff}" for cutoff in cutoffs
+    )
+    alignment = " | ".join("---:" for _ in range(len(cutoffs) * 2))
+    lines = [
+        f"| Stage | Questions | {metric_headers} |",
+        f"| --- | ---: | {alignment} |",
+    ]
+    for stage, label in RETRIEVAL_STAGES:
+        cells = []
+        for cutoff in cutoffs:
+            cells.extend([
+                f"{mean_bool(rows, f'{stage}_hit_at_{cutoff}'):.3f}",
+                f"{mean_value(rows, f'{stage}_mrr_at_{cutoff}'):.3f}",
+            ])
+        lines.append(f"| {label} | {len(rows)} | {' | '.join(cells)} |")
+    return lines
 
 
 def render_grouped_metrics(
@@ -469,6 +531,10 @@ def render_grouped_metrics(
             f"{mean_value(group_rows, 'final_mrr'):.3f} |"
         )
     return lines
+
+
+def covered_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in results if row["corpus_document_rows"] > 0]
 
 
 def question_kind_group(row: dict[str, Any]) -> str:

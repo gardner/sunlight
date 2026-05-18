@@ -34,7 +34,7 @@ def result(
     vector_hit: bool,
     vector_mrr: float,
 ) -> dict:
-    return {
+    row = {
         "answerable": answerable,
         "corpus_document_rows": corpus_document_rows,
         "final_hit": final_hit,
@@ -53,6 +53,16 @@ def result(
         "vector_hit_at_top_k": vector_hit,
         "vector_mrr_at_top_k": vector_mrr,
     }
+    for cutoff in (5, 10, 20, 50):
+        row[f"bm25_hit_at_{cutoff}"] = False
+        row[f"bm25_mrr_at_{cutoff}"] = 0
+        row[f"hybrid_hit_at_{cutoff}"] = vector_hit
+        row[f"hybrid_mrr_at_{cutoff}"] = vector_mrr
+        row[f"rerank_hit_at_{cutoff}"] = final_hit
+        row[f"rerank_mrr_at_{cutoff}"] = final_mrr
+        row[f"vector_hit_at_{cutoff}"] = vector_hit
+        row[f"vector_mrr_at_{cutoff}"] = vector_mrr
+    return row
 
 
 class EvalSearchReportTests(unittest.TestCase):
@@ -164,8 +174,35 @@ class EvalSearchReportTests(unittest.TestCase):
         )
 
         self.assertIn("## Corpus Coverage Gaps", report)
+        self.assertIn("* Final recall@5: 1.000", report)
         self.assertIn(
             "`q2` production_failure question Expected requests: https://fyi.org.nz/request/q2.",
+            report,
+        )
+
+    def test_report_includes_retrieval_cutoff_metrics(self):
+        report = eval_search.render_report(
+            [
+                result(
+                    "q1",
+                    answerable=True,
+                    final_hit=True,
+                    final_mrr=1.0,
+                    kind="exact_term",
+                    vector_hit=True,
+                    vector_mrr=1.0,
+                ),
+            ],
+            args(),
+        )
+
+        self.assertIn("## Retrieval Cutoff Metrics", report)
+        self.assertIn(
+            "| Stage | Questions | Recall@5 | MRR@5 | Recall@10 | MRR@10 | Recall@20 | MRR@20 | Recall@50 | MRR@50 |",
+            report,
+        )
+        self.assertIn(
+            "| Vector | 1 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |",
             report,
         )
 

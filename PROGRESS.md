@@ -244,6 +244,10 @@ Completed:
 * Added reviewed production-failure eval rows for the live Auckland Council
   leisure-centre/contracted-operator search miss, and made the eval report list
   expected documents that are absent from the current local LanceDB snapshot.
+* Improved search eval reporting so retrieval metrics are calculated over
+  covered expected documents separately from corpus coverage gaps, with
+  Vector/BM25/hybrid recall and MRR shown at 5, 10, 20, and the configured
+  top-k cutoff.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
@@ -389,6 +393,8 @@ uv run python -m unittest tests/test_eval_search.py
 uv run python -m unittest discover -s tests
 uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
 uv run pre-commit run --files scripts/eval_search.py tests/test_eval_search.py manifests/fyi/v1/eval-questions.ndjson PROGRESS.md
+uv run python -m unittest tests/test_eval_search.py
+uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
 ```
 
 ## Notes
