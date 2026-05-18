@@ -410,6 +410,15 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         "",
     ])
     lines.extend(f"* {kind}: {count}" for kind, count in sorted(by_kind.items()))
+    lines.extend(["", "## Corpus Coverage Gaps", ""])
+    gaps = corpus_coverage_gaps(results)
+    if not gaps:
+        lines.append("No expected documents were missing from the local corpus.")
+    else:
+        for row in gaps:
+            expected_requests = ", ".join(row.get("expected_requests") or [])
+            suffix = f" Expected requests: {expected_requests}." if expected_requests else ""
+            lines.append(f"* `{row['id']}` {row['question']}{suffix}")
     lines.extend(["", "## Stage Regressions", ""])
     regressions = stage_regressions(results)
     if not regressions:
@@ -472,6 +481,14 @@ def answerability_group(row: dict[str, Any]) -> str:
     if row.get("answerable") is False:
         return "not_answerable"
     return "unknown"
+
+
+def corpus_coverage_gaps(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in results
+        if row.get("expected_documents") and row.get("corpus_document_rows", 0) == 0
+    ]
 
 
 def stage_regressions(results: list[dict[str, Any]]) -> list[dict[str, Any]]:

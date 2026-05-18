@@ -27,6 +27,7 @@ def result(
     question_id: str,
     *,
     answerable: bool,
+    corpus_document_rows: int = 1,
     final_hit: bool,
     final_mrr: float,
     kind: str,
@@ -35,7 +36,7 @@ def result(
 ) -> dict:
     return {
         "answerable": answerable,
-        "corpus_document_rows": 1,
+        "corpus_document_rows": corpus_document_rows,
         "final_hit": final_hit,
         "final_mrr": final_mrr,
         "id": question_id,
@@ -45,6 +46,8 @@ def result(
         "rerank_mrr_at_final_k": final_mrr,
         "bm25_hit_at_top_k": False,
         "bm25_mrr_at_top_k": 0,
+        "expected_documents": [f"doc-{question_id}"],
+        "expected_requests": [f"https://fyi.org.nz/request/{question_id}"],
         "hybrid_hit_at_top_k": vector_hit,
         "hybrid_mrr_at_top_k": vector_mrr,
         "vector_hit_at_top_k": vector_hit,
@@ -133,6 +136,38 @@ class EvalSearchReportTests(unittest.TestCase):
 
         self.assertIn("## Stage Regressions", report)
         self.assertIn("`q2` semantic question", report)
+
+    def test_report_calls_out_corpus_coverage_gaps(self):
+        report = eval_search.render_report(
+            [
+                result(
+                    "q1",
+                    answerable=True,
+                    final_hit=True,
+                    final_mrr=1.0,
+                    kind="exact_term",
+                    vector_hit=True,
+                    vector_mrr=1.0,
+                ),
+                result(
+                    "q2",
+                    answerable=True,
+                    corpus_document_rows=0,
+                    final_hit=False,
+                    final_mrr=0.0,
+                    kind="production_failure",
+                    vector_hit=False,
+                    vector_mrr=0.0,
+                ),
+            ],
+            args(),
+        )
+
+        self.assertIn("## Corpus Coverage Gaps", report)
+        self.assertIn(
+            "`q2` production_failure question Expected requests: https://fyi.org.nz/request/q2.",
+            report,
+        )
 
     def test_build_fts_match_query_matches_production_sanitization(self):
         query = eval_search_bm25.build_fts_match_query(

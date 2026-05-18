@@ -241,6 +241,9 @@ Completed:
 * Added local SQLite FTS5 BM25 support to `scripts/eval_search.py` via
   `scripts/eval_search_bm25.py`, so the local harness now reports vector-only,
   BM25-only, hybrid RRF, and reranked hybrid retrieval metrics.
+* Added reviewed production-failure eval rows for the live Auckland Council
+  leisure-centre/contracted-operator search miss, and made the eval report list
+  expected documents that are absent from the current local LanceDB snapshot.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
@@ -382,6 +385,10 @@ uv run python scripts/export_hf_markdown_dataset.py --limit 5 --output-dir /tmp/
 uv run python scripts/export_hf_markdown_dataset.py --output-dir storage/huggingface/sunlight-fyi-markdown --force
 uv run python -m unittest discover -s tests
 uv run pre-commit run --files docs/DATASET.md PROGRESS.md
+uv run python -m unittest tests/test_eval_search.py
+uv run python -m unittest discover -s tests
+uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
+uv run pre-commit run --files scripts/eval_search.py tests/test_eval_search.py manifests/fyi/v1/eval-questions.ndjson PROGRESS.md
 ```
 
 ## Notes
@@ -440,8 +447,9 @@ Important naming boundary:
 6. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-7. Expand the reviewed eval manifest beyond 20 questions, especially with live
-   failure cases and more numeric/table-heavy FYI records.
+7. Continue expanding the reviewed eval manifest, especially with more
+   numeric/table-heavy FYI records and additional production failures once
+   search logs expose them.
 8. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
 9. Add exact query response caching for `/api/search` to reduce repeated answer
