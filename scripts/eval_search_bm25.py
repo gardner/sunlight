@@ -312,13 +312,15 @@ def fuse_search_results(
     vector_results: list[dict[str, Any]],
     bm25_results: list[dict[str, Any]],
     limit: int,
+    vector_weight: float = VECTOR_WEIGHT,
+    bm25_weight: float = BM25_WEIGHT,
 ) -> list[dict[str, Any]]:
     candidates: dict[str, dict[str, Any]] = {}
     for index, result in enumerate(vector_results, start=1):
         upsert_fused_candidate(
             candidates,
             result,
-            fused_contribution=VECTOR_WEIGHT * rrf_score(index),
+            fused_contribution=vector_weight * rrf_score(index),
             vector_rank=index,
             vector_score=result.get("score"),
         )
@@ -328,7 +330,7 @@ def fuse_search_results(
             result,
             bm25_rank=index,
             bm25_score=result.get("bm25_score"),
-            fused_contribution=BM25_WEIGHT * rrf_score(index),
+            fused_contribution=bm25_weight * rrf_score(index),
         )
     return sorted(
         candidates.values(),

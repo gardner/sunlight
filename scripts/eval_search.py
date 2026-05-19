@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from eval_search_bm25 import (
+    BM25_WEIGHT,
     DEFAULT_BM25_BATCH_SIZE,
     DEFAULT_BM25_DB,
     LocalBm25Index,
+    VECTOR_WEIGHT,
     fuse_search_results,
     open_or_build_bm25_index,
 )
@@ -52,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--final-k", type=int, default=DEFAULT_FINAL_K)
     parser.add_argument("--bm25-db", type=Path, default=DEFAULT_BM25_DB)
     parser.add_argument("--bm25-batch-size", type=int, default=DEFAULT_BM25_BATCH_SIZE)
+    parser.add_argument("--vector-weight", type=float, default=VECTOR_WEIGHT)
+    parser.add_argument("--bm25-weight", type=float, default=BM25_WEIGHT)
     parser.add_argument("--rebuild-bm25", action="store_true")
     parser.add_argument("--no-bm25", action="store_true")
     parser.add_argument("--limit", type=int)
@@ -102,6 +106,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("top-k values must be positive")
     if args.bm25_batch_size < 1:
         raise SystemExit("--bm25-batch-size must be positive")
+    if args.vector_weight < 0 or args.bm25_weight < 0:
+        raise SystemExit("--vector-weight and --bm25-weight must be non-negative")
+    if args.vector_weight == 0 and args.bm25_weight == 0:
+        raise SystemExit("--vector-weight and --bm25-weight cannot both be zero")
     if args.rerank_top_k > args.top_k:
         raise SystemExit("--rerank-top-k cannot exceed --top-k")
     if args.final_k > args.rerank_top_k:
@@ -234,7 +242,13 @@ def evaluate_question(
     bm25_ms = elapsed_ms(bm25_started)
 
     fusion_started = time.perf_counter()
-    hybrid_results = fuse_search_results(vector_results, bm25_results, args.top_k)
+    hybrid_results = fuse_search_results(
+        vector_results,
+        bm25_results,
+        args.top_k,
+        vector_weight=args.vector_weight,
+        bm25_weight=args.bm25_weight,
+    )
     fusion_ms = elapsed_ms(fusion_started)
 
     rerank_results = []
@@ -415,6 +429,7 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         f"Table: `{args.table}`",
         f"Embedding model: `{args.embed_model}`",
         f"Reranker: `{args.rerank_model if not args.no_rerank else 'disabled'}`",
+        f"RRF weights: vector `{args.vector_weight:.3f}`, BM25 `{args.bm25_weight:.3f}`",
         "",
         "## Metrics",
         "",

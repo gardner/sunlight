@@ -248,6 +248,9 @@ Completed:
   covered expected documents separately from corpus coverage gaps, with
   Vector/BM25/hybrid recall and MRR shown at 5, 10, 20, and the configured
   top-k cutoff.
+* Added local eval controls for Vector/BM25 reciprocal-rank-fusion weights so
+  search experiments can compare first-stage retrieval tradeoffs without
+  editing code between runs.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
@@ -393,6 +396,8 @@ uv run python -m unittest tests/test_eval_search.py
 uv run python -m unittest discover -s tests
 uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
 uv run pre-commit run --files scripts/eval_search.py tests/test_eval_search.py manifests/fyi/v1/eval-questions.ndjson PROGRESS.md
+uv run python -m unittest tests/test_eval_search.py
+uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
 uv run python -m unittest tests/test_eval_search.py
 uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
 ```

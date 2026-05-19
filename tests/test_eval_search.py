@@ -16,10 +16,12 @@ def args() -> SimpleNamespace:
         embed_model="test-embed",
         final_k=5,
         lancedb_uri=Path("/tmp/fyi.lancedb"),
+        bm25_weight=0.45,
         no_rerank=False,
         rerank_model="test-rerank",
         table="chunks",
         top_k=50,
+        vector_weight=0.55,
     )
 
 
@@ -229,6 +231,26 @@ class EvalSearchReportTests(unittest.TestCase):
         self.assertEqual(fused[0]["vector_rank"], 2)
         self.assertEqual(fused[0]["bm25_rank"], 1)
         self.assertGreater(fused[0]["fused_score"], fused[1]["fused_score"])
+
+    def test_fuse_search_candidates_accepts_custom_weights(self):
+        vector = [
+            {"chunk_id": "chunk-a", "document_id": "doc-a", "score": 0.91},
+            {"chunk_id": "chunk-b", "document_id": "doc-b", "score": 0.72},
+        ]
+        bm25 = [
+            {"chunk_id": "chunk-b", "document_id": "doc-b", "bm25_score": -8.0},
+            {"chunk_id": "chunk-c", "document_id": "doc-c", "bm25_score": -9.0},
+        ]
+
+        fused = eval_search_bm25.fuse_search_results(
+            vector,
+            bm25,
+            limit=3,
+            vector_weight=1.0,
+            bm25_weight=0.0,
+        )
+
+        self.assertEqual([row["chunk_id"] for row in fused], ["chunk-a", "chunk-b", "chunk-c"])
 
     def test_local_bm25_index_searches_fake_lancedb_rows(self):
         rows = [
