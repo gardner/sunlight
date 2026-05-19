@@ -4,14 +4,12 @@ import {
   SearchInputError,
   buildAnswerPrompt,
   buildFtsMatchQuery,
-  buildRerankContexts,
   coerceEmbeddingVector,
   extractAnswerText,
   fuseSearchCandidates,
   mapBm25RowToCitation,
   mapVectorizeMatchToCitation,
   normalizeSearchQuestion,
-  rerankCitations,
 } from "../../../lib/search";
 import {
   SearchRequestError,
@@ -23,10 +21,9 @@ import {
 
 const EMBEDDING_MODEL = "@cf/qwen/qwen3-embedding-0.6b";
 const ANSWER_MODEL = "@cf/google/gemma-4-26b-a4b-it";
-const RERANK_MODEL = "@cf/baai/bge-reranker-base" as string;
 const VECTORIZE_CANDIDATE_COUNT = 50;
 const BM25_CANDIDATE_COUNT = 50;
-const RERANK_CANDIDATE_COUNT = 20;
+const FUSED_CANDIDATE_COUNT = 20;
 const DEFAULT_RESULT_COUNT = 5;
 const MAX_RESULT_COUNT = 10;
 
@@ -78,7 +75,7 @@ export async function POST(request: Request) {
     const fusedCandidates = fuseSearchCandidates(
       candidates,
       bm25Candidates,
-      RERANK_CANDIDATE_COUNT,
+      FUSED_CANDIDATE_COUNT,
     );
 
     if (fusedCandidates.length === 0) {
@@ -90,10 +87,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const rerankResult = await timeAsync(
-      async () => rerankSearchCandidates(question, fusedCandidates, resultCount),
-    );
-    const citations = rerankResult.value;
+    const citations = fusedCandidates.slice(0, resultCount);
     const answerResult = await timeAsync(() => env.AI.run(ANSWER_MODEL, {
       max_completion_tokens: 1600,
       max_tokens: 1600,
@@ -117,8 +111,8 @@ export async function POST(request: Request) {
       answer_ms: answerResult.durationMs,
       bm25_candidates: bm25Candidates.length,
       bm25_ms: bm25Result.durationMs,
+      final_selection: "fused",
       fused_candidates: fusedCandidates.length,
-      rerank_ms: rerankResult.durationMs,
       total_ms: Date.now() - startedAt,
       vector_candidates: candidates.length,
       vector_ms: matches.durationMs,
@@ -156,25 +150,6 @@ function normalizeResultCount(value: unknown): number {
     return DEFAULT_RESULT_COUNT;
   }
   return Math.min(MAX_RESULT_COUNT, Math.max(1, Math.floor(value)));
-}
-
-async function rerankSearchCandidates(
-  question: string,
-  candidates: ReturnType<typeof mapVectorizeMatchToCitation>[],
-  resultCount: number,
-) {
-  try {
-    const rerankResult = await env.AI.run(RERANK_MODEL, {
-      contexts: buildRerankContexts(candidates),
-      query: question,
-      top_k: Math.min(resultCount, candidates.length),
-    });
-
-    return rerankCitations(candidates, rerankResult, resultCount);
-  } catch (error) {
-    console.warn("Sunlight search reranker failed; falling back to Vectorize order", error);
-    return rerankCitations(candidates, undefined, resultCount);
-  }
 }
 
 async function searchBm25Candidates(question: string, limit: number) {

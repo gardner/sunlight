@@ -28,8 +28,7 @@ user question
   -> Vectorize index: fyi-v2, top 50 semantic candidates
   -> D1 FTS5 sidecar: sunlight-search, top 50 BM25 candidates
   -> reciprocal-rank fusion by chunk_id, top 20 fused candidates
-  -> Workers AI reranker: @cf/baai/bge-reranker-base
-  -> top 5 reranked citations by default, max 10
+  -> top 5 fused citations by default, max 10
   -> Workers AI answer model: @cf/google/gemma-4-26b-a4b-it
   -> JSON answer + citations
 ```
@@ -39,7 +38,6 @@ The route returns score fields that identify each retrieval stage:
 ```json
 {
   "score": 0.398,
-  "rerankScore": 0.398,
   "fusedScore": 0.016,
   "vectorScore": 0.567,
   "vectorRank": 3,
@@ -48,8 +46,8 @@ The route returns score fields that identify each retrieval stage:
 }
 ```
 
-`score` is the display/sort score for the latest completed stage. After
-reranking, it is the reranker score. `vectorScore`, `bm25Score`, and
+`score` is the display/sort score for the latest completed stage. In the current
+production path, it is the fused score. `vectorScore`, `bm25Score`, and
 `fusedScore` preserve earlier retrieval evidence for debugging and future evals.
 
 ## Why BM25
@@ -228,18 +226,21 @@ fused_score = 0.55 * rrf(vector_rank) + 0.45 * rrf(bm25_rank)
 ```
 
 The initial weights intentionally keep semantic retrieval slightly dominant
-while giving exact-term matches enough influence to enter the reranker window.
+while giving exact-term matches enough influence to enter the fused citation
+window.
 
-The route sends the top 20 fused candidates to `@cf/baai/bge-reranker-base` and
-uses the top 5 reranked citations for answer generation by default.
+The route now uses fused order directly for answer generation. In the 22-question
+local eval set, fused order beat the BGE reranked path on final recall@5 and
+MRR@5, so the reranker remains an offline experiment until a stronger gating or
+reranking policy is validated.
 
 If BM25 fails, the route logs a warning and falls back to Vectorize-only
-retrieval. If reranking fails, the route falls back to fused order.
+retrieval.
 
 ## Abuse Protection
 
 The public search route has cheap checks before it starts any embedding,
-Vectorize, reranking, or answer-generation work:
+Vectorize, BM25, or answer-generation work:
 
 * requests with a non-JSON `Content-Type` return `415`
 * request bodies over 4 KB return `413`
@@ -345,7 +346,7 @@ Retrieval would still happen before generation:
 ```text
 route receives UI messages
   -> normalize latest user message
-  -> Vectorize + D1 + reranker
+  -> Vectorize + D1 BM25 + RRF
   -> streamText with retrieved citations in the prompt
   -> stream answer and citation metadata
 ```
@@ -356,10 +357,10 @@ Cloudflare AI Gateway can be used with the AI SDK in two distinct ways:
    `gateway`, and `apiKey`.
 2. `workers-ai-provider` with the Worker `AI` binding and a `gateway` option.
 
-For now, keep direct `env.AI.run` for embeddings and reranking. The AI SDK
-reranking docs currently focus on providers such as Cohere, Bedrock, and
-Together.ai, while Cloudflare's BGE reranker is directly available through the
-Workers AI binding.
+For now, keep direct `env.AI.run` for embeddings and answer generation. The AI
+SDK reranking docs currently focus on providers such as Cohere, Bedrock, and
+Together.ai; Cloudflare's BGE reranker remains available through the Workers AI
+binding for offline experiments.
 
 Recommended AI SDK migration:
 
@@ -392,7 +393,7 @@ Build a small labeled set first:
 Measure at least:
 
 * retrieval recall at 5, 10, 20, and 50 before generation
-* reranked citation relevance at 5
+* fused and reranked citation relevance at 5
 * grounded answer quality
 * citation faithfulness
 * latency by stage
@@ -400,6 +401,7 @@ Measure at least:
 Compare:
 
 * Vectorize only
+* Vectorize + D1 BM25 + RRF
 * Vectorize + D1 BM25 + RRF + BGE reranker
 * Cloudflare AI Search hybrid mode
 
