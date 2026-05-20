@@ -147,6 +147,9 @@ default text preview chars: 800
 
 The cap keeps each SQL statement below D1 statement limits while preserving
 enough body text for lexical retrieval. Source artifacts remain outside D1.
+For answer generation, BM25 citations hydrate snippets from the capped
+`chunk_text` column rather than the shorter `text_preview`, currently limited to
+2,400 characters per BM25 citation in the Worker response path.
 
 Generate import shards:
 

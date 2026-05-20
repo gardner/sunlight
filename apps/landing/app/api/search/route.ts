@@ -24,6 +24,7 @@ const EMBEDDING_MODEL = "@cf/qwen/qwen3-embedding-0.6b";
 const ANSWER_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 const VECTORIZE_CANDIDATE_COUNT = 50;
 const BM25_CANDIDATE_COUNT = 50;
+const BM25_SNIPPET_CHARS = 2400;
 const FUSED_CANDIDATE_COUNT = 20;
 const DEFAULT_RESULT_COUNT = 5;
 const MAX_RESULT_COUNT = 10;
@@ -179,13 +180,13 @@ async function searchBm25Candidates(question: string, limit: number) {
         c.request_url,
         c.request_year,
         c.source_url,
-        c.text_preview
+        substr(c.chunk_text, 1, ?) AS text_preview
       FROM disclosed_chunks_fts
       JOIN disclosed_chunks c ON c.chunk_id = disclosed_chunks_fts.chunk_id
       WHERE disclosed_chunks_fts MATCH ?
       ORDER BY bm25_score
       LIMIT ?
-    `).bind(matchQuery, limit).all();
+    `).bind(BM25_SNIPPET_CHARS, matchQuery, limit).all();
 
     return (result.results ?? [])
       .map((row, index) => mapBm25RowToCitation(row as Bm25SearchRow, index))

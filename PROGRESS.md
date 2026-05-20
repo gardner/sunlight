@@ -260,6 +260,9 @@ Completed:
   hits, de-duplicate by document, and then fill from fused order, because live
   smoke tests showed BM25-only evidence could otherwise remain below the answer
   context even when D1 found strong lexical hits.
+* Hydrated BM25 citation snippets from capped D1 `chunk_text` instead of the
+  shorter `text_preview`, improving answer context for exact-term hits whose
+  supporting details appear later in the chunk.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
