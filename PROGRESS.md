@@ -280,6 +280,34 @@ Completed:
 * Added `docs/DATASET.md` with the Hugging Face dataset plan, schema, source of
   truth, full and delta publishing workflows, living dataset update loop,
   validation gates, responsible-use notes, and open release decisions.
+* Inspected the local Tenancy Tribunal scrape and added `docs/TRIBUNAL.md` with
+  the first-class Docling, embedding, Vectorize, D1 BM25, metadata enrichment,
+  UI, and eval plan for tribunal decisions.
+* Added tested Tenancy ingestion modules:
+  * `scripts/tenancy_corpus.py` for source discovery, sidecar metadata,
+    deterministic enrichment, and generated retrieval views.
+  * `scripts/ingest_tenancy.py` for Docling conversion, optional LLM metadata
+    enrichment, and Qwen/LanceDB embedding.
+* Extended the LanceDB writer, Vectorize exporter, BM25 exporter, and chunk
+  record builder to preserve source-aware tribunal metadata and generated
+  retrieval-view fields.
+* Removed the scratch MarkItDown Tenancy production path; Docling is now the
+  canonical Tenancy converter.
+* Ran the full local Tenancy import:
+  * 32,378 unique Tenancy Tribunal PDFs discovered after deduping by `pdf_url`.
+  * 32,378 Docling markdown files written under
+    `storage/justice/tenancy/markdown_docling`.
+  * 32,378 embedding markers written.
+  * 412,537 chunk rows written to
+    `storage/justice/tenancy/lancedb/chunks_v2`.
+* Verified GPU usage during the import: Docling/RapidOCR selected GPU 0 for
+  OCR/model stages, and Qwen embedding ran on CUDA with
+  `CUDA_VISIBLE_DEVICES=0`.
+* Verified Tenancy ingestion idempotency: a rerun skipped all 32,378 converted
+  markdown files, and the embedding pass found zero pending files.
+* Left full-corpus LLM enrichment as a separate resumable batch because the
+  local `nvidia/regular` model produced usable JSON but was too slow for the
+  full 32k-document pass.
 
 ## Verification
 
@@ -419,6 +447,16 @@ uv run python -m unittest tests/test_eval_search.py
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm landing:build
+uv run python -m unittest tests.test_tenancy_corpus tests.test_ingest_tenancy tests.test_export_bm25_to_d1 tests.test_export_to_vectorize tests.test_parallel_convert_and_embed
+uv run python -m unittest discover -s tests
+uv run ruff check scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/embedding_helpers.py scripts/tenancy_corpus.py scripts/parallel_convert_and_embed.py scripts/export_bm25_to_d1.py scripts/export_to_vectorize.py scripts/fyi_lancedb_writer.py tests/test_ingest_tenancy.py tests/test_tenancy_corpus.py tests/test_parallel_convert_and_embed.py tests/test_export_bm25_to_d1.py tests/test_export_to_vectorize.py
+uv run ruff check --select C901 scripts/ingest_tenancy.py scripts/parallel_convert_and_embed.py scripts/tenancy_llm.py scripts/embedding_helpers.py
+uv run coverage run --source=scripts -m unittest tests.test_tenancy_corpus tests.test_ingest_tenancy tests.test_export_bm25_to_d1 tests.test_export_to_vectorize tests.test_parallel_convert_and_embed
+uv run coverage report -m scripts/tenancy_corpus.py scripts/tenancy_llm.py scripts/embedding_helpers.py scripts/ingest_tenancy.py scripts/parallel_convert_and_embed.py scripts/export_bm25_to_d1.py scripts/export_to_vectorize.py scripts/fyi_lancedb_writer.py
+uv run scripts/ingest_tenancy.py --limit 1 --convert-workers 1 --embed-batch-size 1 --llm-batch-size 1 --embed-gpu 0 --llm-timeout 180 --llm-max-tokens 4096
+uv run scripts/ingest_tenancy.py --skip-llm --convert-workers 6 --max-tasks-per-worker 20 --embed-batch-size 64 --model-embed-batch-size 8 --embed-gpu 0 --convert-gpu 0
+uv run scripts/ingest_tenancy.py --skip-llm --skip-embed --convert-workers 6 --max-tasks-per-worker 200 --convert-gpu 0
+uv run scripts/ingest_tenancy.py --skip-convert --skip-llm --embed-gpu 0
 ```
 
 ## Notes
@@ -462,31 +500,44 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Choose the Hugging Face dataset repo id, visibility, and license wording,
+1. Run controlled Tenancy LLM enrichment batches, inspect generated summaries,
+   catchwords, questions, and legal principles, then decide whether to scale the
+   resumable enrichment pass across all 32k decisions.
+2. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
+   arrears, bond, suppression, statute-section, amount-heavy, and
+   absent-answer cases.
+3. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
+   existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
+4. Compare Tenancy vector, BM25, hybrid, and generated-view retrieval before
+   enabling Tenancy in public search.
+5. Update the landing search API and UI for multi-source citations, labels, and
+   source filters.
+6. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
+7. Choose the Hugging Face dataset repo id, visibility, and license wording,
    then publish with the exporter upload command.
-2. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+8. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
    stays living; use full snapshots by default and delta exports when append-only
    updates are useful.
-3. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+9. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-4. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+10. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-5. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+11. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-6. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+12. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-7. Continue expanding the reviewed eval manifest, especially with more
+13. Continue expanding the reviewed eval manifest, especially with more
    numeric/table-heavy FYI records and additional production failures once
    search logs expose them.
-8. Add optional local vLLM answer generation and answer-grounding checks to the
+14. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-9. Add exact query response caching for `/api/search` to reduce repeated answer
+15. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-10. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+16. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-11. Do a controlled live Cloudflare Email Sending test before sending to real
+17. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-12. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+18. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.

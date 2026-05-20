@@ -64,11 +64,29 @@ def clean_metadata(
         "chunk_id",
         "chunk_index",
         "source",
+        "source_type",
+        "retrieval_view",
+        "canonical_document_id",
+        "generated",
+        "authority_name",
+        "authority_slug",
+        "authority_category",
+        "request_title",
+        "request_year",
         "source_url",
+        "source_page_url",
         "request_url",
         "fyi_request_id",
         "fyi_response_id",
         "fyi_attachment_id",
+        "tenancy_order_id",
+        "tenancy_application_number",
+        "nztt_citation",
+        "decision_date",
+        "published_date",
+        "legal_issue_tags",
+        "statute_sections",
+        "suppression_status",
         "original_filename",
         "pdf_r2_key",
         "markdown_r2_key",
@@ -128,27 +146,46 @@ def open_chunks_table(persist_dir: Path, table_name: str):
 
 
 def iter_rows(table, batch_size: int):
-    dataset = table.to_lance()
-    scanner = dataset.scanner(
-        columns=[
+    columns = selected_table_columns(
+        table,
+        (
             "chunk_id",
             "vector",
             "document_id",
             "chunk_index",
             "source",
+            "source_type",
+            "retrieval_view",
+            "canonical_document_id",
+            "generated",
+            "authority_name",
+            "authority_slug",
+            "authority_category",
+            "request_title",
+            "request_year",
             "source_url",
+            "source_page_url",
             "request_url",
             "fyi_request_id",
             "fyi_response_id",
             "fyi_attachment_id",
+            "tenancy_order_id",
+            "tenancy_application_number",
+            "nztt_citation",
+            "decision_date",
+            "published_date",
+            "legal_issue_tags",
+            "statute_sections",
+            "suppression_status",
             "original_filename",
             "pdf_r2_key",
             "markdown_r2_key",
             "embedding_model",
             "text_preview",
-        ],
-        batch_size=batch_size,
+        ),
     )
+    dataset = table.to_lance()
+    scanner = dataset.scanner(columns=columns, batch_size=batch_size)
     reader = scanner.to_reader()
 
     while True:
@@ -158,6 +195,23 @@ def iter_rows(table, batch_size: int):
             return
 
         yield from batch.to_pylist()
+
+
+def selected_table_columns(table, columns: tuple[str, ...]) -> list[str]:
+    available = table_column_names(table)
+    if not available:
+        return list(columns)
+    return [column for column in columns if column in available]
+
+
+def table_column_names(table) -> set[str]:
+    schema = getattr(table, "schema", None)
+    if callable(schema):
+        schema = schema()
+    names = getattr(schema, "names", None)
+    if names is None and hasattr(table, "to_lance"):
+        names = getattr(table.to_lance().schema, "names", None)
+    return set(names or [])
 
 
 def export_rows(

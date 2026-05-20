@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from urllib.parse import quote
 
@@ -178,6 +179,19 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
         self.assertEqual(args.chunk_size, 8192)
         self.assertEqual(args.chunk_overlap, 128)
         self.assertEqual(args.model_embed_batch_size, 8)
+
+    def test_embedding_model_kwargs_fall_back_without_flash_attention(self):
+        module = load_module()
+        embedding_helpers = sys.modules["embedding_helpers"]
+
+        class FakeTorch:
+            bfloat16 = "bf16"
+
+        with patch.object(embedding_helpers.importlib.util, "find_spec", return_value=None):
+            kwargs = module.embedding_model_kwargs(FakeTorch)
+
+        self.assertEqual(kwargs["torch_dtype"], "bf16")
+        self.assertEqual(kwargs["attn_implementation"], "sdpa")
 
     def test_default_data_dirs_resolve_through_repo_symlink(self):
         module = load_module()
@@ -362,6 +376,72 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
                 [FakeNode()], [Path("/tmp/foo.md")], "test-model"
             )
 
+    def test_build_chunk_records_preserves_public_source_metadata(self):
+        module = load_module()
+
+        class FakeNode:
+            text = "chunk body text"
+            metadata = {
+                "authority_category": "Tribunal",
+                "authority_name": "Tenancy Tribunal",
+                "authority_slug": "tenancy-tribunal",
+                "document_id": "doc_justice_tenancy_172069933",
+                "request_title": "Tenancy Tribunal order 4294057 - 20/05/2021",
+                "request_year": 2021,
+                "source": "justice_tenancy",
+            }
+
+        [record] = module.build_chunk_records(
+            [FakeNode()], [Path("/tmp/foo.md")], "test-model"
+        )
+
+        self.assertEqual(record["authority_category"], "Tribunal")
+        self.assertEqual(record["authority_name"], "Tenancy Tribunal")
+        self.assertEqual(record["authority_slug"], "tenancy-tribunal")
+        self.assertEqual(record["request_title"], "Tenancy Tribunal order 4294057 - 20/05/2021")
+        self.assertEqual(record["request_year"], 2021)
+
+    def test_build_chunk_records_separates_generated_retrieval_views(self):
+        module = load_module()
+
+        class SourceNode:
+            text = "same text"
+            metadata = {
+                "document_id": "doc_justice_tenancy_172069933",
+                "retrieval_view": "source_text",
+                "generated": False,
+                "source": "justice_tenancy",
+            }
+
+        class SummaryNode:
+            text = "same text"
+            metadata = {
+                "canonical_document_id": "doc_justice_tenancy_172069933",
+                "document_id": "doc_justice_tenancy_172069933",
+                "retrieval_view": "case_summary",
+                "generated": True,
+                "source": "justice_tenancy",
+                "source_type": "tribunal_decision",
+                "tenancy_order_id": "172069933",
+                "tenancy_application_number": "4294057",
+                "nztt_citation": "[2021] NZTT 4294057",
+            }
+
+        source_record, summary_record = module.build_chunk_records(
+            [SourceNode(), SummaryNode()], [Path("/tmp/foo.md")], "test-model"
+        )
+
+        self.assertNotEqual(source_record["chunk_id"], summary_record["chunk_id"])
+        self.assertEqual(source_record["retrieval_view"], "source_text")
+        self.assertFalse(source_record["generated"])
+        self.assertEqual(summary_record["retrieval_view"], "case_summary")
+        self.assertTrue(summary_record["generated"])
+        self.assertEqual(summary_record["canonical_document_id"], "doc_justice_tenancy_172069933")
+        self.assertEqual(summary_record["source_type"], "tribunal_decision")
+        self.assertEqual(summary_record["tenancy_order_id"], "172069933")
+        self.assertEqual(summary_record["tenancy_application_number"], "4294057")
+        self.assertEqual(summary_record["nztt_citation"], "[2021] NZTT 4294057")
+
     def test_lancedb_writer_deduplicates_chunk_ids(self):
         module = load_module()
 
@@ -376,11 +456,24 @@ class ParallelConvertAndEmbedTests(unittest.TestCase):
                 "chunk_text": "hello world",
                 "text_preview": "hello world",
                 "source": "fyi",
+                "source_type": "official_information_response",
+                "retrieval_view": "source_text",
+                "canonical_document_id": "doc_1",
+                "generated": False,
                 "source_url": "https://example.test/file.pdf",
+                "source_page_url": "https://example.test/request/1",
                 "request_url": "https://example.test/request/1",
                 "fyi_request_id": 1,
                 "fyi_response_id": 2,
                 "fyi_attachment_id": 3,
+                "tenancy_order_id": None,
+                "tenancy_application_number": None,
+                "nztt_citation": None,
+                "decision_date": None,
+                "published_date": None,
+                "legal_issue_tags": None,
+                "statute_sections": None,
+                "suppression_status": None,
                 "original_filename": "file.pdf",
                 "pdf_r2_key": "canonical/fyi/v1/pdf/request/1/response/2/attach/3/file.pdf",
                 "markdown_r2_key": "markdown/fyi/v1/request/1/response/2/attach/3/doc_1.md",

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -37,14 +37,21 @@ COLUMNS = (
     "chunk_id",
     "document_id",
     "source",
+    "source_type",
+    "retrieval_view",
     "authority_name",
     "authority_slug",
     "authority_category",
     "request_title",
     "request_url",
     "source_url",
+    "source_page_url",
     "original_filename",
     "markdown_r2_key",
+    "tenancy_order_id",
+    "tenancy_application_number",
+    "nztt_citation",
+    "decision_date",
     "chunk_index",
     "chunk_text",
     "text_preview",
@@ -155,24 +162,43 @@ def build_row(
     max_chunk_text_chars: int,
 ) -> dict[str, object]:
     document_id = str(metadata["document_id"])
+    retrieval_view = str(metadata.get("retrieval_view") or "source_text")
     indexed_text = collapse_whitespace(chunk_text)[:max_chunk_text_chars]
     return {
-        "chunk_id": chunk_id_for_record(document_id, chunk_index, chunk_text),
+        "chunk_id": chunk_id_for_record(document_id, chunk_index, chunk_text, retrieval_view),
         "document_id": document_id,
         "source": metadata.get("source") or "fyi",
-        "authority_name": request_metadata.get("authority_name"),
-        "authority_slug": request_metadata.get("authority_slug"),
-        "authority_category": request_metadata.get("authority_category"),
-        "request_title": request_metadata.get("request_title"),
+        "source_type": metadata.get("source_type"),
+        "retrieval_view": retrieval_view,
+        "authority_name": metadata_value(metadata, request_metadata, "authority_name"),
+        "authority_slug": metadata_value(metadata, request_metadata, "authority_slug"),
+        "authority_category": metadata_value(metadata, request_metadata, "authority_category"),
+        "request_title": metadata_value(metadata, request_metadata, "request_title"),
         "request_url": metadata.get("request_url"),
         "source_url": metadata.get("source_url"),
+        "source_page_url": metadata.get("source_page_url"),
         "original_filename": metadata.get("original_filename"),
         "markdown_r2_key": metadata.get("markdown_r2_key"),
+        "tenancy_order_id": metadata.get("tenancy_order_id"),
+        "tenancy_application_number": metadata.get("tenancy_application_number"),
+        "nztt_citation": metadata.get("nztt_citation"),
+        "decision_date": metadata.get("decision_date"),
         "chunk_index": chunk_index,
         "chunk_text": indexed_text,
         "text_preview": indexed_text[:800],
-        "request_year": request_metadata.get("request_year"),
+        "request_year": metadata_value(metadata, request_metadata, "request_year"),
     }
+
+
+def metadata_value(
+    metadata: dict[str, object],
+    request_metadata: dict,
+    key: str,
+) -> object:
+    value = request_metadata.get(key)
+    if value not in (None, "", []):
+        return value
+    return metadata.get(key)
 
 
 def write_sql_shards(rows, output_dir: Path, rows_per_file: int, reset: bool) -> tuple[list[Path], int]:
@@ -238,8 +264,16 @@ def apply_sql_shards(paths: list[Path], database: str, config: Path, *, remote: 
         subprocess.run(command, check=True)
 
 
-def chunk_id_for_record(document_id: str, chunk_index: int, chunk_text: str) -> str:
+def chunk_id_for_record(
+    document_id: str,
+    chunk_index: int,
+    chunk_text: str,
+    retrieval_view: str | None = None,
+) -> str:
     text_digest = hashlib.sha1(chunk_text.encode("utf-8")).hexdigest()[:12]
+    if retrieval_view and retrieval_view != "source_text":
+        safe_view = re.sub(r"[^a-zA-Z0-9_]+", "_", retrieval_view).strip("_")
+        return f"chunk_{document_id}_{safe_view}_{chunk_index:04d}_{text_digest}"
     return f"chunk_{document_id}_{chunk_index:04d}_{text_digest}"
 
 

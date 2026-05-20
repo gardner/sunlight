@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import gc
 import hashlib
-import json
 import multiprocessing as mp
 import os
 import queue
@@ -43,6 +42,7 @@ from urllib.parse import quote, unquote
 
 from fyi_lancedb_writer import LanceDBChunkWriter
 from fyi_markdown import make_chunker, parse_markdown_document, render_markdown_document
+from embedding_helpers import chunk_id_for_record, embedding_model_kwargs, metadata_json
 from table_extractor import extract_tables
 
 
@@ -344,13 +344,8 @@ def node_text(node) -> str:
     raise ValueError("Node does not expose text content")
 
 
-def chunk_id_for_record(document_id: str, chunk_index: int, chunk_text: str) -> str:
-    text_digest = hashlib.sha1(chunk_text.encode("utf-8")).hexdigest()[:12]
-    return f"chunk_{document_id}_{chunk_index:04d}_{text_digest}"
-
-
 def build_chunk_records(nodes, markdown_paths: list[Path], embedding_model_name: str) -> list[dict[str, object]]:
-    chunk_counts: dict[str, int] = {}
+    chunk_counts: dict[tuple[str, str], int] = {}
     records: list[dict[str, object]] = []
     created_at = utc_now_iso()
 
@@ -363,22 +358,44 @@ def build_chunk_records(nodes, markdown_paths: list[Path], embedding_model_name:
                 f"Node metadata is missing document_id: {metadata!r}"
             )
         document_id = str(document_id)
-        chunk_index = chunk_counts.get(document_id, 0)
-        chunk_counts[document_id] = chunk_index + 1
+        retrieval_view = str(metadata.get("retrieval_view") or "source_text")
+        chunk_key = (document_id, retrieval_view)
+        chunk_index = chunk_counts.get(chunk_key, 0)
+        chunk_counts[chunk_key] = chunk_index + 1
 
         records.append(
             {
-                "chunk_id": chunk_id_for_record(document_id, chunk_index, chunk_text),
+                "chunk_id": chunk_id_for_record(
+                    document_id, chunk_index, chunk_text, retrieval_view
+                ),
                 "document_id": document_id,
                 "chunk_index": chunk_index,
                 "chunk_text": chunk_text,
                 "text_preview": chunk_text[:500],
                 "source": metadata.get("source"),
+                "source_type": metadata.get("source_type"),
+                "retrieval_view": retrieval_view,
+                "canonical_document_id": metadata.get("canonical_document_id") or document_id,
+                "generated": bool(metadata.get("generated")),
+                "authority_name": metadata.get("authority_name"),
+                "authority_slug": metadata.get("authority_slug"),
+                "authority_category": metadata.get("authority_category"),
+                "request_title": metadata.get("request_title"),
+                "request_year": metadata.get("request_year"),
                 "source_url": metadata.get("source_url"),
+                "source_page_url": metadata.get("source_page_url"),
                 "request_url": metadata.get("request_url"),
                 "fyi_request_id": metadata.get("fyi_request_id"),
                 "fyi_response_id": metadata.get("fyi_response_id"),
                 "fyi_attachment_id": metadata.get("fyi_attachment_id"),
+                "tenancy_order_id": metadata.get("tenancy_order_id"),
+                "tenancy_application_number": metadata.get("tenancy_application_number"),
+                "nztt_citation": metadata.get("nztt_citation"),
+                "decision_date": metadata.get("decision_date"),
+                "published_date": metadata.get("published_date"),
+                "legal_issue_tags": metadata_json(metadata.get("legal_issue_tags")),
+                "statute_sections": metadata_json(metadata.get("statute_sections")),
+                "suppression_status": metadata.get("suppression_status"),
                 "original_filename": metadata.get("original_filename"),
                 "pdf_r2_key": metadata.get("pdf_r2_key"),
                 "markdown_r2_key": metadata.get("markdown_r2_key"),
@@ -475,10 +492,7 @@ def embedding_worker(
         device=device,
         max_length=chunk_size,
         embed_batch_size=model_embed_batch_size,
-        model_kwargs={
-            "torch_dtype": torch.bfloat16,
-            "attn_implementation": "flash_attention_2",
-        },
+        model_kwargs=embedding_model_kwargs(torch),
     )
     chunker = make_chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     writer = LanceDBChunkWriter(persist_dir, table_name=table_name)
