@@ -256,6 +256,10 @@ Completed:
   beat the BGE reranked path on the reviewed set.
 * Changed the landing search API to use fused Vectorize + BM25 order directly
   for answer citations while leaving the BGE reranker as an offline experiment.
+* Updated final search citation selection to reserve top Vectorize and BM25
+  hits, de-duplicate by document, and then fill from fused order, because live
+  smoke tests showed BM25-only evidence could otherwise remain below the answer
+  context even when D1 found strong lexical hits.
 * Added `scripts/export_hf_markdown_dataset.py` to package FYI markdown as a
   Hugging Face-ready Parquet dataset folder with Markdown content, frontmatter,
   FYI request metadata, a dataset card, export manifest, record index, and
@@ -405,6 +409,10 @@ uv run python -m unittest tests/test_eval_search.py
 uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
 uv run python -m unittest tests/test_eval_search.py
 uv run ruff check scripts/eval_search.py scripts/eval_search_bm25.py tests/test_eval_search.py
+pnpm test:ts
+pnpm exec tsc --noEmit
+pnpm landing:build
+uv run python -m unittest tests/test_eval_search.py
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm landing:build

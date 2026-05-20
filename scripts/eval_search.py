@@ -19,6 +19,7 @@ from eval_search_bm25 import (
     VECTOR_WEIGHT,
     fuse_search_results,
     open_or_build_bm25_index,
+    select_source_diverse_results,
 )
 
 
@@ -258,7 +259,16 @@ def evaluate_question(
         rerank_results = rerank(row["question"], hybrid_results[: args.rerank_top_k], reranker)
         rerank_ms = elapsed_ms(rerank_started)
 
-    final_results = (rerank_results or hybrid_results)[: args.final_k]
+    final_results = (
+        rerank_results[: args.final_k]
+        if rerank_results
+        else select_source_diverse_results(
+            hybrid_results,
+            vector_results,
+            bm25_results,
+            args.final_k,
+        )
+    )
     vector_metrics = stage_metrics("vector", vector_results, row, retrieval_cutoffs)
     bm25_metrics = stage_metrics("bm25", bm25_results, row, retrieval_cutoffs)
     hybrid_metrics = stage_metrics("hybrid", hybrid_results, row, retrieval_cutoffs)
@@ -429,6 +439,7 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         f"Table: `{args.table}`",
         f"Embedding model: `{args.embed_model}`",
         f"Reranker: `{args.rerank_model if not args.no_rerank else 'disabled'}`",
+        f"Final selection: `{final_selection_label(args)}`",
         f"RRF weights: vector `{args.vector_weight:.3f}`, BM25 `{args.bm25_weight:.3f}`",
         "",
         "## Metrics",
@@ -512,6 +523,10 @@ def render_cutoff_metrics(rows: list[dict[str, Any]], args: argparse.Namespace) 
             ])
         lines.append(f"| {label} | {len(rows)} | {' | '.join(cells)} |")
     return lines
+
+
+def final_selection_label(args: argparse.Namespace) -> str:
+    return "reranked" if not args.no_rerank else "source_diverse_fused"
 
 
 def render_grouped_metrics(

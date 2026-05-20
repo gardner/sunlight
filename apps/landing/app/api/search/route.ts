@@ -10,6 +10,7 @@ import {
   mapBm25RowToCitation,
   mapVectorizeMatchToCitation,
   normalizeSearchQuestion,
+  selectFinalCitations,
 } from "../../../lib/search";
 import {
   SearchRequestError,
@@ -87,7 +88,12 @@ export async function POST(request: Request) {
       });
     }
 
-    const citations = fusedCandidates.slice(0, resultCount);
+    const citations = selectFinalCitations(
+      fusedCandidates,
+      candidates,
+      bm25Candidates,
+      resultCount,
+    );
     const answerResult = await timeAsync(() => env.AI.run(ANSWER_MODEL, {
       max_completion_tokens: 1600,
       max_tokens: 1600,
@@ -111,7 +117,7 @@ export async function POST(request: Request) {
       answer_ms: answerResult.durationMs,
       bm25_candidates: bm25Candidates.length,
       bm25_ms: bm25Result.durationMs,
-      final_selection: "fused",
+      final_selection: "source_diverse_fused",
       fused_candidates: fusedCandidates.length,
       total_ms: Date.now() - startedAt,
       vector_candidates: candidates.length,

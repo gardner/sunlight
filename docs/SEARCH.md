@@ -28,7 +28,7 @@ user question
   -> Vectorize index: fyi-v2, top 50 semantic candidates
   -> D1 FTS5 sidecar: sunlight-search, top 50 BM25 candidates
   -> reciprocal-rank fusion by chunk_id, top 20 fused candidates
-  -> top 5 fused citations by default, max 10
+  -> source-diverse final citations by default: top vector, top BM25, then fused fill
   -> Workers AI answer model: @cf/google/gemma-4-26b-a4b-it
   -> JSON answer + citations
 ```
@@ -229,10 +229,12 @@ The initial weights intentionally keep semantic retrieval slightly dominant
 while giving exact-term matches enough influence to enter the fused citation
 window.
 
-The route now uses fused order directly for answer generation. In the 22-question
-local eval set, fused order beat the BGE reranked path on final recall@5 and
-MRR@5, so the reranker remains an offline experiment until a stronger gating or
-reranking policy is validated.
+The route now uses a source-diverse fused selection for answer generation:
+reserve one top Vectorize citation and two top BM25 citations, de-duplicate by
+document where possible, then fill the remaining citation slots from fused
+order. In the 22-question local eval set, this beat the BGE reranked path on
+final recall@5 and MRR@5, so the reranker remains an offline experiment until a
+stronger gating or reranking policy is validated.
 
 If BM25 fails, the route logs a warning and falls back to Vectorize-only
 retrieval.

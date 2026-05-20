@@ -13,6 +13,8 @@ from typing import Any
 
 DEFAULT_BM25_DB = Path("storage/evals/search/local-bm25.sqlite3")
 DEFAULT_BM25_BATCH_SIZE = 1000
+FINAL_VECTOR_RESERVED = 1
+FINAL_BM25_RESERVED = 2
 MAX_FTS_TERMS = 12
 VECTOR_WEIGHT = 0.55
 BM25_WEIGHT = 0.45
@@ -336,6 +338,61 @@ def fuse_search_results(
         candidates.values(),
         key=lambda item: (-(item.get("fused_score") or 0), item.get("chunk_id") or ""),
     )[:limit]
+
+
+def select_source_diverse_results(
+    fused_results: list[dict[str, Any]],
+    vector_results: list[dict[str, Any]],
+    bm25_results: list[dict[str, Any]],
+    final_k: int,
+) -> list[dict[str, Any]]:
+    if final_k <= 0:
+        return []
+    if final_k < 3:
+        return dedupe_results(fused_results)[:final_k]
+
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    add_selected_results(selected, seen, vector_results, FINAL_VECTOR_RESERVED, final_k)
+    add_selected_results(
+        selected,
+        seen,
+        bm25_results,
+        min(FINAL_BM25_RESERVED, final_k - len(selected)),
+        final_k,
+    )
+    add_selected_results(selected, seen, fused_results, float("inf"), final_k)
+    return selected
+
+
+def dedupe_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    add_selected_results(selected, seen, results, float("inf"), len(results))
+    return selected
+
+
+def add_selected_results(
+    selected: list[dict[str, Any]],
+    seen: set[str],
+    results: list[dict[str, Any]],
+    result_limit: float,
+    total_limit: int,
+) -> None:
+    added = 0
+    for result in results:
+        if len(selected) >= total_limit or added >= result_limit:
+            return
+        key = result_dedupe_key(result)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(result)
+        added += 1
+
+
+def result_dedupe_key(result: dict[str, Any]) -> str:
+    return str(result.get("document_id") or result.get("source_url") or result.get("chunk_id"))
 
 
 def upsert_fused_candidate(

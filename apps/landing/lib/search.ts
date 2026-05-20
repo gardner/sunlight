@@ -1,6 +1,8 @@
 const MIN_QUESTION_LENGTH = 4;
 const MAX_QUESTION_LENGTH = 700;
 const MAX_FTS_TERMS = 12;
+const FINAL_VECTOR_RESERVED = 1;
+const FINAL_BM25_RESERVED = 2;
 const VECTOR_WEIGHT = 0.55;
 const BM25_WEIGHT = 0.45;
 const RRF_K = 60;
@@ -317,6 +319,34 @@ export function fuseSearchCandidates(
   );
 }
 
+export function selectFinalCitations(
+  fusedCandidates: SearchCitation[],
+  vectorCandidates: SearchCitation[],
+  bm25Candidates: SearchCitation[],
+  topK: number,
+): SearchCitation[] {
+  if (topK <= 0) {
+    return [];
+  }
+  if (topK < 3) {
+    return relabelCitations(dedupeCitations(fusedCandidates).slice(0, topK));
+  }
+
+  const selected: SearchCitation[] = [];
+  const seen = new Set<string>();
+  addSelectedCitations(selected, seen, vectorCandidates, FINAL_VECTOR_RESERVED, topK);
+  addSelectedCitations(
+    selected,
+    seen,
+    bm25Candidates,
+    Math.min(FINAL_BM25_RESERVED, topK - selected.length),
+    topK,
+  );
+  addSelectedCitations(selected, seen, fusedCandidates, Number.POSITIVE_INFINITY, topK);
+
+  return relabelCitations(selected);
+}
+
 export function extractAnswerText(value: unknown): string {
   if (typeof value === "string") {
     return value.trim();
@@ -442,6 +472,39 @@ function roundScore(value: number): number {
 
 function quoteFtsTerm(term: string): string {
   return `"${term.replaceAll('"', '""')}"`;
+}
+
+function dedupeCitations(citations: SearchCitation[]): SearchCitation[] {
+  const selected: SearchCitation[] = [];
+  const seen = new Set<string>();
+  addSelectedCitations(selected, seen, citations, Number.POSITIVE_INFINITY, citations.length);
+  return selected;
+}
+
+function addSelectedCitations(
+  selected: SearchCitation[],
+  seen: Set<string>,
+  candidates: SearchCitation[],
+  candidateLimit: number,
+  totalLimit: number,
+): void {
+  let added = 0;
+  for (const candidate of candidates) {
+    if (selected.length >= totalLimit || added >= candidateLimit) {
+      return;
+    }
+    const key = citationDedupeKey(candidate);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    selected.push(candidate);
+    added += 1;
+  }
+}
+
+function citationDedupeKey(citation: SearchCitation): string {
+  return citation.documentId ?? citation.sourceUrl ?? citation.chunkId;
 }
 
 function reciprocalRank(rank: number): number {

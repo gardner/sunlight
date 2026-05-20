@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type SearchCitation,
   buildAnswerPrompt,
   buildFtsMatchQuery,
   buildRerankContexts,
@@ -10,7 +11,23 @@ import {
   mapVectorizeMatchToCitation,
   normalizeSearchQuestion,
   rerankCitations,
+  selectFinalCitations,
 } from "./search";
+
+function citation(
+  chunkId: string,
+  title: string,
+  overrides: Partial<SearchCitation> = {},
+): SearchCitation {
+  return {
+    chunkId,
+    label: "Source 1",
+    score: 0,
+    snippet: `${title} snippet`,
+    title,
+    ...overrides,
+  };
+}
 
 describe("normalizeSearchQuestion", () => {
   it("trims useful questions", () => {
@@ -233,6 +250,50 @@ describe("fuseSearchCandidates", () => {
         snippet: "BM25 only",
         title: "BM25 only",
       },
+    ]);
+  });
+});
+
+describe("selectFinalCitations", () => {
+  it("reserves room for strong BM25 hits before filling from fused order", () => {
+    const vector = [
+      citation("vector_1", "Vector 1", { documentId: "doc-v1", vectorRank: 1 }),
+      citation("vector_2", "Vector 2", { documentId: "doc-v2", vectorRank: 2 }),
+      citation("vector_3", "Vector 3", { documentId: "doc-v3", vectorRank: 3 }),
+    ];
+    const bm25 = [
+      citation("bm25_1", "BM25 1", { bm25Rank: 1, documentId: "doc-b1" }),
+      citation("bm25_2", "BM25 2", { bm25Rank: 2, documentId: "doc-b2" }),
+    ];
+    const fused = [
+      citation("vector_1", "Vector 1", { documentId: "doc-v1", fusedScore: 0.009 }),
+      citation("vector_2", "Vector 2", { documentId: "doc-v2", fusedScore: 0.008 }),
+      citation("vector_3", "Vector 3", { documentId: "doc-v3", fusedScore: 0.007 }),
+      citation("bm25_1", "BM25 1", { bm25Rank: 1, documentId: "doc-b1", fusedScore: 0.006 }),
+      citation("bm25_2", "BM25 2", { bm25Rank: 2, documentId: "doc-b2", fusedScore: 0.005 }),
+    ];
+
+    expect(selectFinalCitations(fused, vector, bm25, 5).map((item) => item.chunkId)).toEqual([
+      "vector_1",
+      "bm25_1",
+      "bm25_2",
+      "vector_2",
+      "vector_3",
+    ]);
+  });
+
+  it("deduplicates selected citations by document id", () => {
+    const vector = [
+      citation("vector_1", "Vector 1", { documentId: "doc-shared", vectorRank: 1 }),
+    ];
+    const bm25 = [
+      citation("bm25_1", "BM25 duplicate", { bm25Rank: 1, documentId: "doc-shared" }),
+      citation("bm25_2", "BM25 2", { bm25Rank: 2, documentId: "doc-b2" }),
+    ];
+
+    expect(selectFinalCitations([], vector, bm25, 5).map((item) => item.chunkId)).toEqual([
+      "vector_1",
+      "bm25_2",
     ]);
   });
 });

@@ -252,6 +252,42 @@ class EvalSearchReportTests(unittest.TestCase):
 
         self.assertEqual([row["chunk_id"] for row in fused], ["chunk-a", "chunk-b", "chunk-c"])
 
+    def test_source_diverse_final_selection_reserves_bm25_hits(self):
+        vector = [
+            {"chunk_id": "vector-a", "document_id": "doc-vector-a"},
+            {"chunk_id": "vector-b", "document_id": "doc-vector-b"},
+            {"chunk_id": "vector-c", "document_id": "doc-vector-c"},
+        ]
+        bm25 = [
+            {"chunk_id": "bm25-a", "document_id": "doc-bm25-a"},
+            {"chunk_id": "bm25-b", "document_id": "doc-bm25-b"},
+        ]
+        fused = [
+            {"chunk_id": "vector-a", "document_id": "doc-vector-a"},
+            {"chunk_id": "vector-b", "document_id": "doc-vector-b"},
+            {"chunk_id": "vector-c", "document_id": "doc-vector-c"},
+            {"chunk_id": "bm25-a", "document_id": "doc-bm25-a"},
+            {"chunk_id": "bm25-b", "document_id": "doc-bm25-b"},
+        ]
+
+        selected = eval_search.select_source_diverse_results(fused, vector, bm25, final_k=5)
+
+        self.assertEqual(
+            [row["chunk_id"] for row in selected],
+            ["vector-a", "bm25-a", "bm25-b", "vector-b", "vector-c"],
+        )
+
+    def test_source_diverse_final_selection_deduplicates_documents(self):
+        vector = [{"chunk_id": "vector-a", "document_id": "doc-shared"}]
+        bm25 = [
+            {"chunk_id": "bm25-a", "document_id": "doc-shared"},
+            {"chunk_id": "bm25-b", "document_id": "doc-bm25-b"},
+        ]
+
+        selected = eval_search.select_source_diverse_results([], vector, bm25, final_k=5)
+
+        self.assertEqual([row["chunk_id"] for row in selected], ["vector-a", "bm25-b"])
+
     def test_local_bm25_index_searches_fake_lancedb_rows(self):
         rows = [
             {
