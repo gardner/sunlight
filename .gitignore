@@ -29,6 +29,7 @@ apps/*/dev.log
 
 # Generated FYI/vector artifacts
 storage/
+fyi
 fyi_vectors.ndjson
 current_templates.json
 stitch_open_data_project_brief.zip
