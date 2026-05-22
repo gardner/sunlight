@@ -8,6 +8,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import eval_search  # noqa: E402
+import eval_search_agentic  # noqa: E402
 import eval_search_bm25  # noqa: E402
 
 
@@ -22,6 +23,9 @@ def args() -> SimpleNamespace:
         table="chunks",
         top_k=50,
         vector_weight=0.55,
+        agentic=False,
+        agentic_max_rounds=2,
+        agentic_expansions=2,
     )
 
 
@@ -44,6 +48,7 @@ def result(
         "id": question_id,
         "kind": kind,
         "question": f"{kind} question",
+        "retrieval_policy": "hybrid",
         "rerank_hit_at_final_k": final_hit,
         "rerank_mrr_at_final_k": final_mrr,
         "bm25_hit_at_top_k": False,
@@ -207,6 +212,143 @@ class EvalSearchReportTests(unittest.TestCase):
             "| Vector | 1 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |",
             report,
         )
+
+    def test_report_summarizes_agentic_second_passes(self):
+        first = result(
+            "q1",
+            answerable=True,
+            final_hit=True,
+            final_mrr=1.0,
+            kind="exact_term",
+            vector_hit=True,
+            vector_mrr=1.0,
+        )
+        first["retrieval_policy"] = "agentic"
+        first["agentic_trace"] = {
+            "second_pass_reason": "exact_terms_missing",
+            "rounds": [
+                {"query": "original"},
+                {"query": "expanded"},
+            ],
+        }
+        second = result(
+            "q2",
+            answerable=True,
+            final_hit=True,
+            final_mrr=1.0,
+            kind="semantic",
+            vector_hit=True,
+            vector_mrr=1.0,
+        )
+        second["retrieval_policy"] = "agentic"
+        second["agentic_trace"] = {"rounds": [{"query": "original"}]}
+        agentic_args = args()
+        agentic_args.agentic = True
+
+        report = eval_search.render_report([first, second], agentic_args)
+
+        self.assertIn("Retrieval policy: `agentic`", report)
+        self.assertIn("## Agentic Trace Summary", report)
+        self.assertIn("* Second-pass retrievals: 1/2", report)
+        self.assertIn("* exact_terms_missing: 1", report)
+
+    def test_agentic_query_plan_extracts_tenancy_exact_lookup(self):
+        plan = eval_search_agentic.build_agentic_query_plan(
+            "What did Tenancy Tribunal order 172069933 say about rent arrears?"
+        )
+
+        self.assertEqual(plan.query_kind, "exact_lookup")
+        self.assertEqual(plan.source_filter, "justice_tenancy")
+        self.assertIn("172069933", plan.entities)
+        self.assertIn("rent", plan.must_terms)
+        self.assertIn("arrears", plan.must_terms)
+        self.assertTrue(plan.abstain_if_no_exact_evidence)
+        self.assertTrue(plan.needs_full_document)
+        self.assertTrue(any("172069933" in query for query in plan.expanded_queries))
+
+    def test_agentic_query_plan_preserves_alphanumeric_identifiers(self):
+        plan = eval_search_agentic.build_agentic_query_plan(
+            "What years are covered in the OIA0743 JOB-12557 spreadsheet?"
+        )
+
+        self.assertEqual(plan.query_kind, "exact_lookup")
+        self.assertIn("OIA0743", plan.entities)
+        self.assertIn("JOB-12557", plan.entities)
+        self.assertNotIn("in", plan.must_terms)
+        self.assertTrue(any("OIA0743" in query for query in plan.expanded_queries))
+
+    def test_agentic_retrieval_runs_bounded_second_pass_for_weak_exact_evidence(self):
+        vector_calls = []
+        bm25_calls = []
+        initial_vector = [{"chunk_id": "wrong-vector", "document_id": "wrong-doc"}]
+        initial_bm25 = []
+
+        def search_vector(query: str) -> list[dict]:
+            vector_calls.append(query)
+            if "172069933" in query:
+                return [{"chunk_id": "right-vector", "document_id": "right-doc"}]
+            return []
+
+        def search_bm25(query: str) -> list[dict]:
+            bm25_calls.append(query)
+            if "172069933" in query:
+                return [{"chunk_id": "right-bm25", "document_id": "right-doc"}]
+            return []
+
+        result_row = eval_search_agentic.extend_retrieval_with_agentic_rounds(
+            "What did Tenancy Tribunal order 172069933 say about rent arrears?",
+            initial_vector,
+            initial_bm25,
+            search_vector,
+            search_bm25,
+            top_k=5,
+            vector_weight=0.55,
+            bm25_weight=0.45,
+            max_rounds=2,
+            max_expansions=2,
+        )
+
+        self.assertEqual(len(vector_calls), 2)
+        self.assertEqual(len(bm25_calls), 2)
+        self.assertEqual(result_row.trace["second_pass_reason"], "exact_terms_missing")
+        self.assertEqual(len(result_row.trace["rounds"]), 3)
+        self.assertTrue(any(row["document_id"] == "right-doc" for row in result_row.hybrid_results))
+
+    def test_agentic_retrieval_skips_second_pass_when_evidence_is_strong(self):
+        vector_calls = []
+        bm25_calls = []
+        initial_vector = [
+            {
+                "chunk_id": "shared",
+                "document_id": "doc-a",
+                "text_preview": "rent arrears in order 172069933",
+            }
+        ]
+        initial_bm25 = [
+            {
+                "chunk_id": "shared",
+                "document_id": "doc-a",
+                "text_preview": "rent arrears in order 172069933",
+            }
+        ]
+
+        result_row = eval_search_agentic.extend_retrieval_with_agentic_rounds(
+            "What did Tenancy Tribunal order 172069933 say about rent arrears?",
+            initial_vector,
+            initial_bm25,
+            lambda query: vector_calls.append(query) or [],
+            lambda query: bm25_calls.append(query) or [],
+            top_k=5,
+            vector_weight=0.55,
+            bm25_weight=0.45,
+            max_rounds=2,
+            max_expansions=2,
+        )
+
+        self.assertEqual(vector_calls, [])
+        self.assertEqual(bm25_calls, [])
+        self.assertIsNone(result_row.trace["second_pass_reason"])
+        self.assertEqual(len(result_row.trace["rounds"]), 1)
 
     def test_build_fts_match_query_matches_production_sanitization(self):
         query = eval_search_bm25.build_fts_match_query(

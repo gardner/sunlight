@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+import eval_search_agentic
 from eval_search_bm25 import (
     BM25_WEIGHT,
     DEFAULT_BM25_BATCH_SIZE,
@@ -62,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--no-rerank", action="store_true")
+    eval_search_agentic.add_agentic_parser_args(parser)
     return parser
 
 
@@ -115,6 +117,7 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--rerank-top-k cannot exceed --top-k")
     if args.final_k > args.rerank_top_k:
         raise SystemExit("--final-k cannot exceed --rerank-top-k")
+    eval_search_agentic.validate_agentic_args(args)
 
 
 def default_lancedb_uri() -> Path:
@@ -251,6 +254,28 @@ def evaluate_question(
         bm25_weight=args.bm25_weight,
     )
     fusion_ms = elapsed_ms(fusion_started)
+    agentic_trace = None
+    agentic_timings = {}
+    retrieval_policy = "hybrid"
+    if args.agentic:
+        retrieval_policy = "agentic"
+        agentic_result = eval_search_agentic.extend_retrieval_with_agentic_rounds(
+            row["question"],
+            vector_results,
+            bm25_results,
+            lambda query: search_lancedb(table, embedder.get_query_embedding(query), args.top_k),
+            lambda query: bm25_index.search(query, args.top_k) if bm25_index else [],
+            top_k=args.top_k,
+            vector_weight=args.vector_weight,
+            bm25_weight=args.bm25_weight,
+            max_rounds=args.agentic_max_rounds,
+            max_expansions=args.agentic_expansions,
+        )
+        vector_results = agentic_result.vector_results
+        bm25_results = agentic_result.bm25_results
+        hybrid_results = agentic_result.hybrid_results
+        agentic_trace = agentic_result.trace
+        agentic_timings = agentic_result.timings_ms
 
     rerank_results = []
     rerank_ms = 0
@@ -285,6 +310,8 @@ def evaluate_question(
         "id": row["id"],
         "kind": row.get("kind"),
         "question": row["question"],
+        "retrieval_policy": retrieval_policy,
+        "agentic_trace": agentic_trace,
         "bm25_hit_at_top_k": bm25_metrics[f"bm25_hit_at_{args.top_k}"],
         "bm25_mrr_at_top_k": bm25_metrics[f"bm25_mrr_at_{args.top_k}"],
         "bm25_top_k": compact_results(bm25_results),
@@ -302,6 +329,7 @@ def evaluate_question(
             "rerank": rerank_ms,
             "total": elapsed_ms(started),
             "vector_retrieval": vector_ms,
+            **agentic_timings,
         },
         "vector_hit_at_top_k": vector_metrics[f"vector_hit_at_{args.top_k}"],
         "vector_mrr_at_top_k": vector_metrics[f"vector_mrr_at_{args.top_k}"],
@@ -439,6 +467,7 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         f"Table: `{args.table}`",
         f"Embedding model: `{args.embed_model}`",
         f"Reranker: `{args.rerank_model if not args.no_rerank else 'disabled'}`",
+        f"Retrieval policy: `{eval_search_agentic.retrieval_policy_label(args)}`",
         f"Final selection: `{final_selection_label(args)}`",
         f"RRF weights: vector `{args.vector_weight:.3f}`, BM25 `{args.bm25_weight:.3f}`",
         "",
@@ -471,6 +500,7 @@ def render_report(results: list[dict[str, Any]], args: argparse.Namespace) -> st
         "",
     ])
     lines.extend(render_grouped_metrics(covered, answerability_group, args))
+    lines.extend(eval_search_agentic.render_agentic_trace_summary(results))
     lines.extend([
         "",
         "## Question Types",

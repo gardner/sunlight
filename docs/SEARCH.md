@@ -242,6 +242,19 @@ stronger gating or reranking policy is validated.
 If BM25 fails, the route logs a warning and falls back to Vectorize-only
 retrieval.
 
+## Agentic Retrieval Experiment
+
+`scripts/eval_search.py` has an offline `--agentic` mode for testing a bounded
+retrieval controller before changing production. It analyzes the query, runs the
+normal vector plus BM25 hybrid path, inspects whether exact or numeric evidence
+is missing, and can run one capped expansion round before fusing candidates
+again.
+
+This is intentionally not an open-ended agent. It has a fixed tool list, a
+default maximum of two retrieval rounds, no external web access, no mutation,
+and trace output for every eval question. The controller design and promotion
+criteria are in `docs/AGENTIC_RAG.md`.
+
 ## Abuse Protection
 
 The public search route has cheap checks before it starts any embedding,
