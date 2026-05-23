@@ -1,7 +1,12 @@
 "use client";
 
-import { ExternalLink, LoaderCircle, Search } from "lucide-react";
+import { CheckCircle2, CircleDashed, ExternalLink, LoaderCircle, Search } from "lucide-react";
 import { FormEvent, useState } from "react";
+import {
+  type SearchProgressStage,
+  type SearchStreamEvent,
+  parseSearchStreamLines,
+} from "../../lib/search";
 
 interface SearchCitation {
   authorityName?: string;
@@ -19,6 +24,7 @@ interface SearchResponse {
   citations?: SearchCitation[];
   error?: string;
   question?: string;
+  stages?: SearchProgressStage[];
 }
 
 const EXAMPLE_QUESTIONS = [
@@ -32,6 +38,7 @@ export function SearchClient() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [stages, setStages] = useState<SearchProgressStage[]>([]);
 
   async function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,20 +51,41 @@ export function SearchClient() {
 
     setIsLoading(true);
     setError("");
+    setResult(null);
+    setStages([]);
 
     try {
       const response = await fetch("/api/search", {
-        body: JSON.stringify({ question: trimmed }),
+        body: JSON.stringify({ question: trimmed, stream: true }),
         headers: {
           "content-type": "application/json",
         },
         method: "POST",
       });
-      const payload = (await response.json()) as SearchResponse;
       if (!response.ok) {
+        const payload = (await response.json()) as SearchResponse;
         throw new Error(payload.error || "Search failed.");
       }
-      setResult(payload);
+
+      if (!response.body) {
+        const payload = (await response.json()) as SearchResponse;
+        setStages(payload.stages ?? []);
+        setResult(payload);
+        return;
+      }
+
+      await readSearchStream(response, {
+        onError: (message) => {
+          throw new Error(message);
+        },
+        onResult: (payload) => {
+          setStages(payload.stages ?? []);
+          setResult(payload);
+        },
+        onStage: (stage) => {
+          setStages((current) => upsertStage(current, stage));
+        },
+      });
     } catch (caught) {
       setResult(null);
       setError(caught instanceof Error ? caught.message : "Search failed.");
@@ -106,6 +134,26 @@ export function SearchClient() {
 
       {error ? <p className="search-error">{error}</p> : null}
 
+      {stages.length > 0 ? (
+        <section className="search-stages" aria-label="Search progress" aria-live="polite">
+          {stages.map((stage) => (
+            <div className="search-stage" data-status={stage.status} key={stage.id}>
+              {stage.status === "complete" ? (
+                <CheckCircle2 aria-hidden="true" size={18} />
+              ) : stage.status === "running" ? (
+                <LoaderCircle aria-hidden="true" className="spin-icon" size={18} />
+              ) : (
+                <CircleDashed aria-hidden="true" size={18} />
+              )}
+              <div>
+                <p>{stage.label}</p>
+                <span>{stage.detail ?? stageStatusLabel(stage)}</span>
+              </div>
+            </div>
+          ))}
+        </section>
+      ) : null}
+
       {result ? (
         <section className="search-results" aria-live="polite">
           <div className="answer-panel">
@@ -146,4 +194,78 @@ export function SearchClient() {
       ) : null}
     </div>
   );
+}
+
+async function readSearchStream(
+  response: Response,
+  handlers: {
+    onError(message: string): void;
+    onResult(payload: SearchResponse): void;
+    onStage(stage: SearchProgressStage): void;
+  },
+) {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = parseSearchStreamLines(buffer);
+    buffer = parsed.remainder;
+    handleSearchStreamEvents(parsed.events, handlers);
+  }
+
+  const tail = decoder.decode();
+  if (tail || buffer) {
+    const parsed = parseSearchStreamLines(`${buffer}${tail}\n`);
+    handleSearchStreamEvents(parsed.events, handlers);
+  }
+}
+
+function handleSearchStreamEvents(
+  events: SearchStreamEvent[],
+  handlers: {
+    onError(message: string): void;
+    onResult(payload: SearchResponse): void;
+    onStage(stage: SearchProgressStage): void;
+  },
+) {
+  for (const event of events) {
+    if (event.type === "stage") {
+      handlers.onStage(event.stage);
+    } else if (event.type === "result") {
+      handlers.onResult(event.result);
+    } else {
+      handlers.onError(event.error);
+    }
+  }
+}
+
+function upsertStage(
+  stages: SearchProgressStage[],
+  stage: SearchProgressStage,
+): SearchProgressStage[] {
+  const existingIndex = stages.findIndex((item) => item.id === stage.id);
+  if (existingIndex === -1) {
+    return [...stages, stage];
+  }
+
+  return stages.map((item, index) => (index === existingIndex ? stage : item));
+}
+
+function stageStatusLabel(stage: SearchProgressStage): string {
+  if (stage.count !== undefined) {
+    return `${stage.count} items`;
+  }
+  if (stage.durationMs !== undefined) {
+    return `${stage.durationMs} ms`;
+  }
+  return stage.status === "running" ? "In progress" : "Complete";
 }

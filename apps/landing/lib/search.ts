@@ -90,6 +90,47 @@ export interface SearchCitation {
   vectorScore?: number;
 }
 
+export type SearchStageId =
+  | "embedding"
+  | "bm25"
+  | "vector"
+  | "fusion"
+  | "selection"
+  | "answer";
+
+export type SearchStageStatus = "running" | "complete" | "warning";
+
+export interface SearchProgressStage {
+  count?: number;
+  detail?: string;
+  durationMs?: number;
+  id: SearchStageId;
+  label: string;
+  status: SearchStageStatus;
+}
+
+export interface SearchResponsePayload {
+  answer: string;
+  citations: SearchCitation[];
+  question: string;
+  stages?: SearchProgressStage[];
+}
+
+export type SearchStreamEvent =
+  | {
+      stage: SearchProgressStage;
+      type: "stage";
+    }
+  | {
+      result: SearchResponsePayload;
+      type: "result";
+    }
+  | {
+      error: string;
+      status?: number;
+      type: "error";
+    };
+
 interface VectorizeLikeMatch {
   id?: string;
   metadata?: Record<string, unknown>;
@@ -284,6 +325,24 @@ export function buildFtsMatchQuery(question: string): string {
   const uniqueTerms = Array.from(new Set(terms)).slice(0, MAX_FTS_TERMS);
 
   return uniqueTerms.map(quoteFtsTerm).join(" OR ");
+}
+
+export function encodeSearchStreamEvent(event: SearchStreamEvent): string {
+  return `${JSON.stringify(event)}\n`;
+}
+
+export function parseSearchStreamLines(
+  buffer: string,
+): { events: SearchStreamEvent[]; remainder: string } {
+  const lines = buffer.split("\n");
+  const remainder = lines.pop() ?? "";
+  return {
+    events: lines
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as SearchStreamEvent),
+    remainder,
+  };
 }
 
 export function fuseSearchCandidates(

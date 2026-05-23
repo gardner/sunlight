@@ -50,6 +50,18 @@ The route returns score fields that identify each retrieval stage:
 production path, it is the fused score. `vectorScore`, `bm25Score`, and
 `fusedScore` preserve earlier retrieval evidence for debugging and future evals.
 
+The UI requests streamed progress events by sending `stream: true` in the JSON
+body. The Worker returns newline-delimited JSON events while the search is
+running:
+
+```json
+{"type":"stage","stage":{"id":"embedding","label":"Embed question","status":"running"}}
+{"type":"stage","stage":{"id":"vector","label":"Vector search","status":"complete","count":50}}
+{"type":"result","result":{"answer":"...","citations":[],"question":"...","stages":[]}}
+```
+
+The non-streaming JSON response remains available for direct API callers.
+
 ## Why BM25
 
 Pure vector search missed some exact-term intent. A query about council

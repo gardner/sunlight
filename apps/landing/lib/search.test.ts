@@ -5,11 +5,13 @@ import {
   buildFtsMatchQuery,
   buildRerankContexts,
   coerceEmbeddingVector,
+  encodeSearchStreamEvent,
   extractAnswerText,
   fuseSearchCandidates,
   mapBm25RowToCitation,
   mapVectorizeMatchToCitation,
   normalizeSearchQuestion,
+  parseSearchStreamLines,
   rerankCitations,
   selectFinalCitations,
 } from "./search";
@@ -436,5 +438,52 @@ describe("extractAnswerText", () => {
 
   it("supports older Workers AI response shapes", () => {
     expect(extractAnswerText({ response: "Older response." })).toBe("Older response.");
+  });
+});
+
+describe("search stream events", () => {
+  it("encodes events as newline-delimited JSON", () => {
+    expect(
+      encodeSearchStreamEvent({
+        stage: {
+          id: "embedding",
+          label: "Embed question",
+          status: "running",
+        },
+        type: "stage",
+      }),
+    ).toBe(
+      '{"stage":{"id":"embedding","label":"Embed question","status":"running"},"type":"stage"}\n',
+    );
+  });
+
+  it("parses complete lines and keeps partial stream data as a remainder", () => {
+    const first = encodeSearchStreamEvent({
+      stage: {
+        count: 50,
+        durationMs: 123,
+        id: "vector",
+        label: "Vector search",
+        status: "complete",
+      },
+      type: "stage",
+    });
+    const partial = '{"type":"result"';
+
+    expect(parseSearchStreamLines(first + partial)).toEqual({
+      events: [
+        {
+          stage: {
+            count: 50,
+            durationMs: 123,
+            id: "vector",
+            label: "Vector search",
+            status: "complete",
+          },
+          type: "stage",
+        },
+      ],
+      remainder: partial,
+    });
   });
 });

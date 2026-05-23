@@ -1,10 +1,13 @@
 import { env } from "cloudflare:workers";
 import {
   type Bm25SearchRow,
+  type SearchProgressStage,
+  type SearchResponsePayload,
   SearchInputError,
   buildAnswerPrompt,
   buildFtsMatchQuery,
   coerceEmbeddingVector,
+  encodeSearchStreamEvent,
   extractAnswerText,
   fuseSearchCandidates,
   mapBm25RowToCitation,
@@ -28,6 +31,8 @@ const BM25_SNIPPET_CHARS = 2400;
 const FUSED_CANDIDATE_COUNT = 20;
 const DEFAULT_RESULT_COUNT = 5;
 const MAX_RESULT_COUNT = 10;
+
+type SearchStageEmitter = (stage: SearchProgressStage) => void;
 
 export async function POST(request: Request) {
   try {
@@ -55,83 +60,12 @@ export async function POST(request: Request) {
     const body = await readLimitedSearchJsonBody(request);
     const question = normalizeSearchQuestion(body.question ?? body.query ?? body.message);
     const resultCount = normalizeResultCount(body.topK);
-    const startedAt = Date.now();
 
-    const bm25Promise = timeAsync(async () => searchBm25Candidates(question, BM25_CANDIDATE_COUNT));
-
-    const embedding = await env.AI.run(EMBEDDING_MODEL, {
-      text: [question],
-    });
-    const vector = coerceEmbeddingVector(embedding);
-    const [matches, bm25Result] = await Promise.all([
-      timeAsync(() => env.FYI_VECTORS.query(vector, {
-        returnMetadata: "all",
-        topK: VECTORIZE_CANDIDATE_COUNT,
-      })),
-      bm25Promise,
-    ]);
-    const candidates = matches.value.matches
-      .map(mapVectorizeMatchToCitation)
-      .filter((citation) => citation.snippet || citation.requestUrl || citation.sourceUrl);
-    const bm25Candidates = bm25Result.value;
-    const fusedCandidates = fuseSearchCandidates(
-      candidates,
-      bm25Candidates,
-      FUSED_CANDIDATE_COUNT,
-    );
-
-    if (fusedCandidates.length === 0) {
-      return jsonResponse({
-        answer:
-          "I could not find a strong matching record in the current Sunlight search index.",
-        citations: [],
-        question,
-      });
+    if (wantsSearchStream(body)) {
+      return streamSearchResponse(question, resultCount);
     }
 
-    const citations = selectFinalCitations(
-      fusedCandidates,
-      candidates,
-      bm25Candidates,
-      resultCount,
-    );
-    const answerResult = await timeAsync(() => env.AI.run(ANSWER_MODEL, {
-      max_completion_tokens: 1600,
-      max_tokens: 1600,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You answer questions about New Zealand official information releases. Use only the supplied sources, keep answers concise, and cite factual claims with bracketed source numbers.",
-        },
-        {
-          role: "user",
-          content: buildAnswerPrompt(question, citations),
-        },
-      ],
-      reasoning_effort: "low",
-      temperature: 0.2,
-    }));
-    const answer = extractAnswerText(answerResult.value);
-
-    console.log("Sunlight search timings", {
-      answer_ms: answerResult.durationMs,
-      bm25_candidates: bm25Candidates.length,
-      bm25_ms: bm25Result.durationMs,
-      final_selection: "source_diverse_fused",
-      fused_candidates: fusedCandidates.length,
-      total_ms: Date.now() - startedAt,
-      vector_candidates: candidates.length,
-      vector_ms: matches.durationMs,
-    });
-
-    return jsonResponse({
-      answer:
-        answer ||
-        "I found matching records, but could not generate a reliable answer from them.",
-      citations,
-      question,
-    });
+    return jsonResponse(await runSearch(question, resultCount));
   } catch (error) {
     if (error instanceof SearchRequestError) {
       return jsonResponse({ error: error.message }, error.status);
@@ -150,6 +84,243 @@ export async function POST(request: Request) {
       502,
     );
   }
+}
+
+async function runSearch(
+  question: string,
+  resultCount: number,
+  emit?: SearchStageEmitter,
+): Promise<SearchResponsePayload> {
+  const startedAt = Date.now();
+  const stages: SearchProgressStage[] = [];
+  const recordStage = (stage: SearchProgressStage) => {
+    const existingIndex = stages.findIndex((item) => item.id === stage.id);
+    if (existingIndex >= 0) {
+      stages[existingIndex] = stage;
+    } else {
+      stages.push(stage);
+    }
+    emit?.(stage);
+  };
+
+  recordStage({
+    detail: "Matching exact names, numbers, titles, and source text in D1.",
+    id: "bm25",
+    label: "BM25 keyword search",
+    status: "running",
+  });
+  const bm25Promise = timeAsync(async () => searchBm25Candidates(question, BM25_CANDIDATE_COUNT))
+    .then((result) => {
+      recordStage({
+        count: result.value.length,
+        detail: `${result.value.length} lexical candidates`,
+        durationMs: result.durationMs,
+        id: "bm25",
+        label: "BM25 keyword search",
+        status: "complete",
+      });
+      return result;
+    });
+
+  recordStage({
+    detail: "Embedding the question for semantic retrieval.",
+    id: "embedding",
+    label: "Embed question",
+    status: "running",
+  });
+  const embeddingResult = await timeAsync(() => env.AI.run(EMBEDDING_MODEL, {
+    text: [question],
+  }));
+  recordStage({
+    detail: "Query embedding ready",
+    durationMs: embeddingResult.durationMs,
+    id: "embedding",
+    label: "Embed question",
+    status: "complete",
+  });
+
+  const vector = coerceEmbeddingVector(embeddingResult.value);
+  recordStage({
+    detail: "Searching Vectorize for semantic neighbours.",
+    id: "vector",
+    label: "Vector search",
+    status: "running",
+  });
+  const [matches, bm25Result] = await Promise.all([
+    timeAsync(() => env.FYI_VECTORS.query(vector, {
+      returnMetadata: "all",
+      topK: VECTORIZE_CANDIDATE_COUNT,
+    })),
+    bm25Promise,
+  ]);
+  const candidates = matches.value.matches
+    .map(mapVectorizeMatchToCitation)
+    .filter((citation) => citation.snippet || citation.requestUrl || citation.sourceUrl);
+  recordStage({
+    count: candidates.length,
+    detail: `${candidates.length} semantic candidates`,
+    durationMs: matches.durationMs,
+    id: "vector",
+    label: "Vector search",
+    status: "complete",
+  });
+
+  recordStage({
+    detail: "Combining lexical and semantic ranks.",
+    id: "fusion",
+    label: "Hybrid fusion",
+    status: "running",
+  });
+  const fusionStartedAt = Date.now();
+  const bm25Candidates = bm25Result.value;
+  const fusedCandidates = fuseSearchCandidates(
+    candidates,
+    bm25Candidates,
+    FUSED_CANDIDATE_COUNT,
+  );
+  recordStage({
+    count: fusedCandidates.length,
+    detail: `${fusedCandidates.length} fused candidates`,
+    durationMs: Date.now() - fusionStartedAt,
+    id: "fusion",
+    label: "Hybrid fusion",
+    status: "complete",
+  });
+
+  if (fusedCandidates.length === 0) {
+    return {
+      answer:
+        "I could not find a strong matching record in the current Sunlight search index.",
+      citations: [],
+      question,
+      stages,
+    };
+  }
+
+  recordStage({
+    detail: "Choosing source-diverse evidence for the answer.",
+    id: "selection",
+    label: "Select citations",
+    status: "running",
+  });
+  const citations = selectFinalCitations(
+    fusedCandidates,
+    candidates,
+    bm25Candidates,
+    resultCount,
+  );
+  recordStage({
+    count: citations.length,
+    detail: `${citations.length} citations selected`,
+    id: "selection",
+    label: "Select citations",
+    status: "complete",
+  });
+
+  recordStage({
+    detail: "Generating a grounded answer from selected evidence.",
+    id: "answer",
+    label: "Generate answer",
+    status: "running",
+  });
+  const answerResult = await timeAsync(() => env.AI.run(ANSWER_MODEL, {
+    max_completion_tokens: 1600,
+    max_tokens: 1600,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You answer questions about New Zealand official information releases. Use only the supplied sources, keep answers concise, and cite factual claims with bracketed source numbers.",
+      },
+      {
+        role: "user",
+        content: buildAnswerPrompt(question, citations),
+      },
+    ],
+    reasoning_effort: "low",
+    temperature: 0.2,
+  }));
+  recordStage({
+    detail: "Answer ready",
+    durationMs: answerResult.durationMs,
+    id: "answer",
+    label: "Generate answer",
+    status: "complete",
+  });
+  const answer = extractAnswerText(answerResult.value);
+
+  console.log("Sunlight search timings", {
+    answer_ms: answerResult.durationMs,
+    bm25_candidates: bm25Candidates.length,
+    bm25_ms: bm25Result.durationMs,
+    final_selection: "source_diverse_fused",
+    fused_candidates: fusedCandidates.length,
+    total_ms: Date.now() - startedAt,
+    vector_candidates: candidates.length,
+    vector_ms: matches.durationMs,
+  });
+
+  return {
+    answer:
+      answer ||
+      "I found matching records, but could not generate a reliable answer from them.",
+    citations,
+    question,
+    stages,
+  };
+}
+
+function streamSearchResponse(question: string, resultCount: number): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let streamOpen = true;
+      const write = (event: Parameters<typeof encodeSearchStreamEvent>[0]) => {
+        if (!streamOpen) {
+          return;
+        }
+        try {
+          controller.enqueue(encoder.encode(encodeSearchStreamEvent(event)));
+        } catch {
+          streamOpen = false;
+        }
+      };
+
+      try {
+        const result = await runSearch(question, resultCount, (stage) => {
+          write({ stage, type: "stage" });
+        });
+        write({ result, type: "result" });
+      } catch (error) {
+        console.error("Sunlight streaming search failed", error);
+        write({
+          error: "Search is temporarily unavailable. Please try again in a moment.",
+          status: 502,
+          type: "error",
+        });
+      } finally {
+        if (streamOpen) {
+          try {
+            controller.close();
+          } catch {
+            // The browser may close the fetch stream before the Worker finishes.
+          }
+        }
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+function wantsSearchStream(body: Record<string, unknown>): boolean {
+  return body.stream === true || body.streamEvents === true;
 }
 
 function normalizeResultCount(value: unknown): number {

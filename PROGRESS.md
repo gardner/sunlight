@@ -312,6 +312,9 @@ Completed:
   mode that analyzes query intent, records a retrieval plan, inspects first-pass
   evidence, and runs a bounded expansion pass only when exact or numeric
   evidence appears weak.
+* Added streamed search progress events to `/api/search` and updated the public
+  search UI to show each stage as it runs: BM25 keyword search, query embedding,
+  Vectorize search, hybrid fusion, citation selection, and answer generation.
 
 ## Verification
 
@@ -467,6 +470,10 @@ uv run ruff check scripts/eval_search.py scripts/eval_search_agentic.py tests/te
 uv run ruff check --select C901 scripts/eval_search.py scripts/eval_search_agentic.py tests/test_eval_search.py
 uv run pre-commit run --files scripts/eval_search.py scripts/eval_search_agentic.py tests/test_eval_search.py docs/AGENTIC_RAG.md docs/SEARCH.md PROGRESS.md
 uv run python scripts/eval_search.py --limit 1 --agentic --no-rerank --output-dir /tmp/sunlight-agentic-eval-smoke --device cuda
+pnpm test:ts apps/landing/lib/search.test.ts
+pnpm test:ts
+pnpm exec tsc --noEmit
+pnpm landing:build
 ```
 
 ## Notes
