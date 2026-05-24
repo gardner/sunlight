@@ -141,12 +141,26 @@ confirmed GPU device 0 during OCR/model stages, while CPU remained heavily used
 for PDF loading, layout, and text extraction. Embedding ran on CUDA with
 `CUDA_VISIBLE_DEVICES=0`.
 
-The full-corpus run intentionally used `--skip-llm`. The local
-`nvidia/regular` model produced usable JSON through chat completions, but it was
-too slow to enrich all 32k decisions in the same ingestion pass. LLM enrichment
-is idempotent and resumable through `llm_enrichment_version`; it should be run
-as a separate controlled batch before adding generated retrieval views to public
+The full-corpus run intentionally used `--skip-llm`. LLM enrichment is
+idempotent and resumable through `llm_enrichment_version`; it should be run as a
+separate controlled batch before adding generated retrieval views to public
 search.
+
+The current enrichment target is the local-network vLLM host at
+`http://192.168.88.96:8000/v1`, serving `Qwen/Qwen3.6-27B-FP8` across two RTX
+5090 32 GB cards with tensor parallel 2, `--max-model-len 131072`,
+`--kv-cache-dtype fp8`, `--gpu-memory-utilization 0.90`,
+`--max-num-batched-tokens 16384`, `--max-num-seqs 5`, and prefix caching
+enabled. API calls use the served model ID `Qwen/Qwen3.6-27B-FP8`; token
+budgeting uses the matching base tokenizer `Qwen/Qwen3.6-27B`.
+
+Although the model context is 131,072 tokens, the practical per-request prompt
+budget is set to 14,336 tokens to stay near the vLLM scheduler's 16,384 batched
+token target while leaving room for output. A 1,000-file Qwen-tokenized sample
+of the existing Tenancy markdown produced 137 enrichment requests at this
+budget: mean 7.3 decisions per request, median 7, and maximum 8. The default
+LLM concurrency is 2; use `--llm-concurrency 4` as the first throughput
+benchmark override.
 
 ## Converter Decision
 
@@ -684,8 +698,9 @@ prompt version
 5. Done: run Docling smoke tests, inspect output, and reject the scratch
    MarkItDown path as production input.
 6. Done: embed the full Tenancy corpus into LanceDB with Qwen3.
-7. Next: run controlled LLM enrichment batches for summaries, catchwords,
-   legal principles, and questions answered.
+7. Next: benchmark controlled LLM enrichment batches at concurrency 2 and 4
+   using the Qwen-tokenized 14,336-token prompt budget, then inspect summaries,
+   catchwords, legal principles, and questions answered.
 8. Next: run Tenancy evals comparing source-only retrieval against generated
    retrieval views before public search export.
 9. Next: export Tenancy vectors to the corpus Vectorize index with citation

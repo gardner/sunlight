@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +19,24 @@ from tenancy_corpus import (
 
 
 LLM_ENRICHMENT_VERSION = "tenancy-llm-v1"
+LLM_PROMPT_TOKEN_MARGIN = 1024
+ENRICHMENT_SYSTEM_PROMPT = (
+    "You enrich New Zealand Tenancy Tribunal decisions for retrieval. "
+    "Return only valid JSON matching the requested schema. "
+    "Return neutral, concise metadata. Do not invent facts. "
+    "Use empty lists or an empty string when the excerpt does not support a field."
+)
+ENRICHMENT_INSTRUCTIONS = {
+    "items": "Return exactly one item for every input document, with no omissions.",
+    "document_id": "Every item must repeat the exact document_id from its input document.",
+    "case_summary": "One neutral sentence under 45 words.",
+    "catchwords": "Three to eight short legal/retrieval catchwords.",
+    "questions_answered": "Three to six natural-language questions this decision answers.",
+    "legal_principles": (
+        "Zero to four reusable principles. confidence must be low, medium, or high; "
+        "source_section should be order, reasons, or boilerplate."
+    ),
+}
 
 
 class LegalPrinciple(BaseModel):
@@ -35,6 +56,27 @@ class GeneratedEnrichment(BaseModel):
 
 class GeneratedEnrichmentBatch(BaseModel):
     items: list[GeneratedEnrichment]
+
+
+@dataclass(frozen=True)
+class LlmBatch:
+    markdown_paths: list[Path]
+    documents: list[dict[str, object]]
+    prompt_tokens: int
+
+
+class RequestRateLimiter:
+    def __init__(self, rpm: int):
+        self.min_interval = 60 / max(rpm, 1)
+        self.last_call_at = 0.0
+        self.lock = threading.Lock()
+
+    def wait(self) -> None:
+        with self.lock:
+            elapsed = time.time() - self.last_call_at
+            if self.last_call_at and elapsed < self.min_interval:
+                time.sleep(self.min_interval - elapsed)
+            self.last_call_at = time.time()
 
 
 def utc_now_iso() -> str:
@@ -120,14 +162,105 @@ def build_llm_input(markdown_paths: list[Path], max_chars: int) -> list[dict[str
     return items
 
 
+def load_qwen_tokenizer(model: str):
+    from transformers import AutoTokenizer
+
+    return AutoTokenizer.from_pretrained(model)
+
+
+def build_llm_batches(
+    markdown_paths: list[Path],
+    *,
+    max_chars: int,
+    tokenizer,
+    prompt_token_budget: int,
+    max_batch_size: int,
+) -> list[LlmBatch]:
+    if not markdown_paths:
+        return []
+
+    batches: list[LlmBatch] = []
+    current_paths: list[Path] = []
+    current_documents: list[dict[str, object]] = []
+
+    for path in markdown_paths:
+        [document] = build_llm_input([path], max_chars)
+        candidate_documents = [*current_documents, document]
+        candidate_tokens = estimate_llm_batch_prompt_tokens(candidate_documents, tokenizer)
+        would_exceed_tokens = current_documents and candidate_tokens > prompt_token_budget
+        would_exceed_count = len(current_documents) >= max_batch_size
+        if would_exceed_tokens or would_exceed_count:
+            batches.append(
+                LlmBatch(
+                    markdown_paths=current_paths,
+                    documents=current_documents,
+                    prompt_tokens=estimate_llm_batch_prompt_tokens(current_documents, tokenizer),
+                )
+            )
+            current_paths = []
+            current_documents = []
+            candidate_documents = [document]
+            candidate_tokens = estimate_llm_batch_prompt_tokens(candidate_documents, tokenizer)
+
+        current_paths.append(path)
+        current_documents.append(document)
+
+        if candidate_tokens > prompt_token_budget and len(current_documents) == 1:
+            batches.append(
+                LlmBatch(
+                    markdown_paths=current_paths,
+                    documents=current_documents,
+                    prompt_tokens=candidate_tokens,
+                )
+            )
+            current_paths = []
+            current_documents = []
+
+    if current_documents:
+        batches.append(
+            LlmBatch(
+                markdown_paths=current_paths,
+                documents=current_documents,
+                prompt_tokens=estimate_llm_batch_prompt_tokens(current_documents, tokenizer),
+            )
+        )
+
+    return batches
+
+
+def estimate_llm_batch_prompt_tokens(documents: list[dict[str, object]], tokenizer) -> int:
+    messages = build_enrichment_messages(documents)
+    return sum(len(tokenizer.encode(message["content"])) + 4 for message in messages)
+
+
+def llm_prompt_token_budget(context_tokens: int, max_tokens: int) -> int:
+    return max(1, context_tokens - max_tokens - LLM_PROMPT_TOKEN_MARGIN)
+
+
+def effective_llm_prompt_token_budget(
+    *,
+    context_tokens: int,
+    max_tokens: int,
+    requested_prompt_tokens: int,
+) -> int:
+    return min(
+        requested_prompt_tokens,
+        llm_prompt_token_budget(context_tokens, max_tokens),
+    )
+
+
 def enrich_with_llm(
     markdown_paths: list[Path],
     *,
     base_url: str,
     api_key: str,
     model: str,
+    tokenizer_model: str,
+    context_tokens: int,
+    prompt_token_budget: int,
     rpm: int,
     batch_size: int,
+    concurrency: int,
     max_chars: int,
     timeout: int,
     max_tokens: int,
@@ -135,47 +268,134 @@ def enrich_with_llm(
     from openai import OpenAI
 
     client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+    tokenizer = load_qwen_tokenizer(tokenizer_model)
+    effective_prompt_budget = effective_llm_prompt_token_budget(
+        context_tokens=context_tokens,
+        max_tokens=max_tokens,
+        requested_prompt_tokens=prompt_token_budget,
+    )
+    batches = build_llm_batches(
+        markdown_paths,
+        max_chars=max_chars,
+        tokenizer=tokenizer,
+        prompt_token_budget=effective_prompt_budget,
+        max_batch_size=batch_size,
+    )
+    print(
+        f"LLM enrichment batching: {len(markdown_paths)} files -> {len(batches)} request(s), "
+        f"model={model}, tokenizer={tokenizer_model}, concurrency={concurrency}, "
+        f"prompt_budget={effective_prompt_budget}",
+        flush=True,
+    )
+    return enrich_batches_with_llm(
+        client=client,
+        batches=batches,
+        model=model,
+        max_tokens=max_tokens,
+        rpm=rpm,
+        concurrency=concurrency,
+        total_files=len(markdown_paths),
+    )
+
+
+def enrich_batches_with_llm(
+    *,
+    client,
+    batches: list[LlmBatch],
+    model: str,
+    max_tokens: int,
+    rpm: int,
+    concurrency: int,
+    total_files: int,
+) -> dict[str, int]:
     counts = {"enriched": 0, "failed": 0}
-    min_interval = 60 / max(rpm, 1)
-    last_call_at = 0.0
+    processed = 0
+    rate_limiter = RequestRateLimiter(rpm)
+    max_workers = max(1, min(concurrency, len(batches) or 1))
 
-    for batch_start in range(0, len(markdown_paths), batch_size):
-        batch = markdown_paths[batch_start : batch_start + batch_size]
-        elapsed = time.time() - last_call_at
-        if last_call_at and elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
-        last_call_at = time.time()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        pending = {}
+        next_batch_index = 0
 
-        try:
-            parsed = request_generated_enrichment_with_retries(
-                client, batch, model, max_chars, max_tokens
+        def submit_next() -> None:
+            nonlocal next_batch_index
+            if next_batch_index >= len(batches):
+                return
+            batch = batches[next_batch_index]
+            future = executor.submit(
+                request_batch_with_rate_limit,
+                client,
+                batch,
+                model,
+                max_tokens,
+                rate_limiter,
             )
-        except Exception as exc:
-            counts["failed"] += len(batch)
-            print(f"LLM enrichment failed for batch starting {batch_start}: {exc}", flush=True)
-            continue
+            pending[future] = (next_batch_index, batch)
+            next_batch_index += 1
 
-        by_id = {item.document_id: item for item in parsed.items}
-        now = utc_now_iso()
-        for path in batch:
-            metadata, _ = parse_tenancy_markdown(path.read_text(encoding="utf-8"))
-            item = by_id.get(str(metadata["document_id"]))
-            if item is None:
-                counts["failed"] += 1
-                continue
-            apply_generated_enrichment(
-                path,
-                item.model_dump(exclude_none=True),
-                model=model,
-                now=now,
-            )
-            counts["enriched"] += 1
-        print(
-            f"LLM enrichment progress {min(batch_start + len(batch), len(markdown_paths))}/"
-            f"{len(markdown_paths)}: {counts}",
-            flush=True,
-        )
+        for _ in range(max_workers):
+            submit_next()
+
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                batch_index, batch = pending.pop(future)
+                try:
+                    parsed = future.result()
+                except Exception as exc:
+                    counts["failed"] += len(batch.markdown_paths)
+                    processed += len(batch.markdown_paths)
+                    print(f"LLM enrichment failed for batch {batch_index + 1}: {exc}", flush=True)
+                    submit_next()
+                    continue
+
+                apply_batch_enrichment(batch, parsed, model, counts)
+                processed += len(batch.markdown_paths)
+                print(
+                    f"LLM enrichment progress {processed}/{total_files}: {counts} "
+                    f"(batch {batch_index + 1}/{len(batches)}, "
+                    f"files={len(batch.markdown_paths)}, prompt_tokens={batch.prompt_tokens})",
+                    flush=True,
+                )
+                submit_next()
+
     return counts
+
+
+def request_batch_with_rate_limit(
+    client,
+    batch: LlmBatch,
+    model: str,
+    max_tokens: int,
+    rate_limiter: RequestRateLimiter,
+) -> GeneratedEnrichmentBatch:
+    rate_limiter.wait()
+    return request_generated_enrichment_for_documents_with_retries(
+        client, batch.documents, model, max_tokens
+    )
+
+
+def apply_batch_enrichment(
+    batch: LlmBatch,
+    parsed: GeneratedEnrichmentBatch,
+    model: str,
+    counts: dict[str, int],
+) -> None:
+    by_id = {item.document_id: item for item in parsed.items}
+    now = utc_now_iso()
+    for path in batch.markdown_paths:
+        metadata, _ = parse_tenancy_markdown(path.read_text(encoding="utf-8"))
+        item = by_id.get(str(metadata["document_id"]))
+        if item is None:
+            counts["failed"] += 1
+            continue
+        apply_generated_enrichment(
+            path,
+            item.model_dump(exclude_none=True),
+            model=model,
+            now=now,
+        )
+        counts["enriched"] += 1
 
 
 def request_generated_enrichment(
@@ -186,50 +406,45 @@ def request_generated_enrichment(
     max_tokens: int,
 ) -> GeneratedEnrichmentBatch:
     documents = build_llm_input(markdown_paths, max_chars)
+    return request_generated_enrichment_for_documents(client, documents, model, max_tokens)
+
+
+def request_generated_enrichment_for_documents(
+    client,
+    documents: list[dict[str, object]],
+    model: str,
+    max_tokens: int,
+) -> GeneratedEnrichmentBatch:
     response = client.chat.completions.create(
         model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You enrich New Zealand Tenancy Tribunal decisions for retrieval. "
-                    "Return only valid JSON matching the requested schema. "
-                    "Return neutral, concise metadata. Do not invent facts. "
-                    "Use empty lists or an empty string when the excerpt does not support a field."
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "instructions": {
-                            "document_id": (
-                                "Every item must repeat the exact document_id "
-                                "from its input document."
-                            ),
-                            "case_summary": "One neutral sentence under 45 words.",
-                            "catchwords": "Three to eight short legal/retrieval catchwords.",
-                            "questions_answered": (
-                                "Three to six natural-language questions this decision answers."
-                            ),
-                            "legal_principles": (
-                                "Zero to four reusable principles. confidence must be "
-                                "low, medium, or high; source_section should be order, "
-                                "reasons, or boilerplate."
-                            ),
-                        },
-                        "documents": documents,
-                    },
-                    ensure_ascii=True,
-                ),
-            },
-        ],
+        messages=build_enrichment_messages(documents),
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        response_format={"type": "json_object"},
         temperature=0,
         max_tokens=max_tokens,
     )
     content = response.choices[0].message.content or ""
     default_document_id = str(documents[0]["document_id"]) if len(documents) == 1 else None
     return parse_enrichment_content(content, default_document_id=default_document_id)
+
+
+def build_enrichment_messages(documents: list[dict[str, object]]) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": ENRICHMENT_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "instructions": ENRICHMENT_INSTRUCTIONS,
+                    "documents": documents,
+                },
+                ensure_ascii=True,
+            ),
+        },
+    ]
 
 
 def parse_enrichment_content(
@@ -273,6 +488,29 @@ def request_generated_enrichment_with_retries(
         try:
             return request_generated_enrichment(
                 client, markdown_paths, model, max_chars, max_tokens
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            time.sleep(min(2**attempt, 10))
+    assert last_error is not None
+    raise last_error
+
+
+def request_generated_enrichment_for_documents_with_retries(
+    client,
+    documents: list[dict[str, object]],
+    model: str,
+    max_tokens: int,
+    *,
+    attempts: int = 3,
+) -> GeneratedEnrichmentBatch:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return request_generated_enrichment_for_documents(
+                client, documents, model, max_tokens
             )
         except Exception as exc:
             last_error = exc

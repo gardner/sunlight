@@ -1,9 +1,11 @@
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "ingest_tenancy.py"
@@ -32,10 +34,46 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(args.persist_dir, Path("storage/justice/tenancy/lancedb"))
         self.assertEqual(args.convert_gpu, "0")
         self.assertEqual(args.embed_gpu, "0")
-        self.assertEqual(args.llm_model, "nvidia/regular")
-        self.assertEqual(args.llm_rpm, 40)
+        self.assertEqual(args.llm_base_url, "http://192.168.88.96:8000/v1")
+        self.assertEqual(args.llm_model, "Qwen/Qwen3.6-27B-FP8")
+        self.assertEqual(args.llm_tokenizer_model, "Qwen/Qwen3.6-27B")
+        self.assertEqual(args.llm_context_tokens, 131072)
+        self.assertEqual(args.llm_prompt_token_budget, 14336)
+        self.assertEqual(args.llm_rpm, 240)
+        self.assertEqual(args.llm_batch_size, 64)
+        self.assertEqual(args.llm_concurrency, 2)
         self.assertEqual(args.llm_timeout, 120)
         self.assertEqual(args.llm_max_tokens, 4096)
+
+    def test_llm_base_url_can_be_overridden_by_environment(self):
+        module = load_module()
+
+        with patch.dict(os.environ, {"TENANCY_LLM_BASE_URL": "http://127.0.0.1:8000/v1"}):
+            args = module.build_parser().parse_args([])
+
+        self.assertEqual(args.llm_base_url, "http://127.0.0.1:8000/v1")
+
+    def test_llm_base_url_can_be_overridden_by_cli(self):
+        module = load_module()
+
+        args = module.build_parser().parse_args(
+            ["--llm-base-url", "http://example.test:8000/v1"]
+        )
+
+        self.assertEqual(args.llm_base_url, "http://example.test:8000/v1")
+
+    def test_llm_prompt_budget_reserves_output_and_margin(self):
+        module = load_module()
+
+        self.assertEqual(module.llm_prompt_token_budget(131072, 4096), 125952)
+        self.assertEqual(
+            module.effective_llm_prompt_token_budget(
+                context_tokens=131072,
+                max_tokens=4096,
+                requested_prompt_tokens=14336,
+            ),
+            14336,
+        )
 
     def test_include_legacy_flag_is_opt_in(self):
         module = load_module()
@@ -166,6 +204,73 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(item["legal_issue_tags"], ["rent_arrears"])
         self.assertEqual(item["excerpt"], "abc")
 
+    def test_build_llm_batches_fills_token_budget_without_exceeding_it(self):
+        module = load_module()
+
+        class FakeTokenizer:
+            def encode(self, text):
+                return [None] * len(text)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            markdown_dir = Path(tmp_dir)
+            paths = []
+            for index in range(3):
+                path = markdown_dir / f"doc-{index}.md"
+                path.write_text(
+                    f'---\ndocument_id: "doc_justice_tenancy_{index}"\n'
+                    f'source: "justice_tenancy"\nparser: "docling"\n'
+                    f'pipeline_version: "{module.PIPELINE_VERSION}"\n---\n\n'
+                    f'{"a" * 20}',
+                    encoding="utf-8",
+                )
+                paths.append(path)
+
+            batches = module.build_llm_batches(
+                paths,
+                max_chars=20,
+                tokenizer=FakeTokenizer(),
+                prompt_token_budget=module.estimate_llm_batch_prompt_tokens(
+                    module.build_llm_input(paths[:2], max_chars=20),
+                    FakeTokenizer(),
+                ),
+                max_batch_size=10,
+            )
+
+        self.assertEqual([batch.markdown_paths for batch in batches], [paths[:2], paths[2:]])
+        self.assertTrue(
+            all(batch.prompt_tokens <= batches[0].prompt_tokens for batch in batches)
+        )
+
+    def test_build_llm_batches_honours_max_batch_size_even_when_tokens_fit(self):
+        module = load_module()
+
+        class FakeTokenizer:
+            def encode(self, text):
+                return text.split()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            markdown_dir = Path(tmp_dir)
+            paths = []
+            for index in range(3):
+                path = markdown_dir / f"doc-{index}.md"
+                path.write_text(
+                    f'---\ndocument_id: "doc_justice_tenancy_{index}"\n'
+                    f'source: "justice_tenancy"\nparser: "docling"\n'
+                    f'pipeline_version: "{module.PIPELINE_VERSION}"\n---\n\nbody',
+                    encoding="utf-8",
+                )
+                paths.append(path)
+
+            batches = module.build_llm_batches(
+                paths,
+                max_chars=20,
+                tokenizer=FakeTokenizer(),
+                prompt_token_budget=100_000,
+                max_batch_size=2,
+            )
+
+        self.assertEqual([batch.markdown_paths for batch in batches], [paths[:2], paths[2:]])
+
     def test_request_generated_enrichment_retries_transient_failures(self):
         module = load_module()
         tenancy_llm = sys.modules["tenancy_llm"]
@@ -195,6 +300,34 @@ class IngestTenancyTests(unittest.TestCase):
 
         self.assertEqual(calls["count"], 2)
         self.assertEqual(result.items[0].case_summary, "Recovered.")
+
+    def test_request_generated_enrichment_disables_qwen_thinking(self):
+        module = load_module()
+        calls = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                calls.update(kwargs)
+                message = SimpleNamespace(
+                    content='{"items":[{"document_id":"doc_justice_tenancy_1"}]}'
+                )
+                return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        class FakeClient:
+            chat = SimpleNamespace(completions=FakeCompletions())
+
+        module.request_generated_enrichment_for_documents(
+            FakeClient(),
+            [{"document_id": "doc_justice_tenancy_1", "excerpt": "body"}],
+            "Qwen/Qwen3.6-27B-FP8",
+            16384,
+        )
+
+        self.assertEqual(
+            calls["extra_body"],
+            {"chat_template_kwargs": {"enable_thinking": False}},
+        )
+        self.assertEqual(calls["response_format"], {"type": "json_object"})
 
     def test_parse_enrichment_content_accepts_json_wrapped_in_text(self):
         module = load_module()

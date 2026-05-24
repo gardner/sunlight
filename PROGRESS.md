@@ -305,9 +305,20 @@ Completed:
   `CUDA_VISIBLE_DEVICES=0`.
 * Verified Tenancy ingestion idempotency: a rerun skipped all 32,378 converted
   markdown files, and the embedding pass found zero pending files.
-* Left full-corpus LLM enrichment as a separate resumable batch because the
-  local `nvidia/regular` model produced usable JSON but was too slow for the
-  full 32k-document pass.
+* Left full-corpus LLM enrichment as a separate resumable batch.
+* Updated Tenancy LLM enrichment to target the local-network vLLM host at
+  `http://192.168.88.96:8000/v1`, using served model
+  `Qwen/Qwen3.6-27B-FP8` with the `Qwen/Qwen3.6-27B` tokenizer for prompt
+  accounting.
+* Added Qwen-token-budgeted LLM batching, JSON response mode, disabled Qwen
+  thinking via vLLM chat-template kwargs, and configurable concurrency. Defaults
+  now target a 14,336-token prompt budget and concurrency 2, with concurrency 4
+  planned as the first throughput benchmark.
+* Sampled 1,000 existing Tenancy markdown files with the Qwen tokenizer at the
+  current 5,000-character excerpt cap: the 14,336-token prompt budget produced
+  137 requests, mean 7.3 decisions per request, median 7, and maximum 8.
+* Smoke-tested remote Qwen enrichment on two temporary Tenancy markdown copies;
+  both enriched successfully with summaries, catchwords, and questions.
 * Analyzed the legacy Tenancy scrape in `justice/data/tenancy/legacy/pdf`:
   11,476 PDFs, exact signature dates for 11,411, 65 fallback dates, and no gap
   before the current scrape because legacy runs through 2023-07-07 while the
@@ -327,6 +338,19 @@ Completed:
   legacy and one current Tenancy PDF. Cloudflare was much faster on the sample
   but flattened tables and joined decision-date text, so Docling remains the
   canonical Tenancy converter for now.
+* Counted Tenancy markdown tokens with the `gpt-4o` tokenizer across 32,380
+  existing Docling markdown files: 106,670,461 full-document tokens total,
+  84,331,062 body-only tokens total, and 42,336,807 tokens when capped to the
+  first 5,000 body characters for enrichment-style prompts.
+* Benchmarked the legacy Tenancy Docling ingestion path on an isolated 24-PDF
+  sample: Docling conversion finished in 18.33 seconds, conversion plus
+  embedding finished in 54.53 seconds, and the remaining 11,474 legacy PDFs are
+  estimated at about 2.5 hours for conversion alone or roughly 6-8 hours
+  end-to-end with `--skip-llm`.
+* Confirmed the resumed legacy run has not completed yet: 2 legacy markdown
+  files currently exist, 0 legacy embedding markers exist, and 11,474 legacy
+  PDFs remain to convert and embed. A PTY run was stopped during the skip phase
+  before it reached legacy conversion.
 * Added `docs/AGENTIC_RAG.md` and an offline `scripts/eval_search.py --agentic`
   mode that analyzes query intent, records a retrieval plan, inspects first-pass
   evidence, and runs a bounded expansion pass only when exact or numeric
@@ -546,11 +570,13 @@ Important naming boundary:
 1. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-2. Resume the legacy Tenancy Docling conversion and embedding run, then verify
-   idempotency and updated LanceDB row counts.
-3. Run controlled Tenancy LLM enrichment batches, inspect generated summaries,
-   catchwords, questions, and legal principles, then decide whether to scale the
-   resumable enrichment pass across all tenancy decisions.
+2. Resume the legacy Tenancy Docling conversion and embedding run for the
+   remaining 11,474 PDFs, budgeting roughly 6-8 hours with `--skip-llm`, then
+   verify idempotency and updated LanceDB row counts.
+3. Benchmark controlled Tenancy LLM enrichment batches at `--llm-concurrency 2`
+   and `--llm-concurrency 4`, inspect generated summaries, catchwords,
+   questions, and legal principles, then decide whether to scale the resumable
+   enrichment pass across all tenancy decisions.
 4. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.

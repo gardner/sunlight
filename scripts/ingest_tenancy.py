@@ -30,11 +30,16 @@ from tenancy_llm import (
     GeneratedEnrichment,
     GeneratedEnrichmentBatch,
     apply_generated_enrichment,
+    build_llm_batches,
     build_llm_input,
     enrich_with_llm,
+    estimate_llm_batch_prompt_tokens,
+    effective_llm_prompt_token_budget,
+    llm_prompt_token_budget,
     parse_enrichment_content,
     pending_llm_markdown_paths,
     request_generated_enrichment,
+    request_generated_enrichment_for_documents,
     request_generated_enrichment_with_retries,
 )
 
@@ -44,9 +49,14 @@ __all__ = [
     "GeneratedEnrichment",
     "GeneratedEnrichmentBatch",
     "apply_generated_enrichment",
+    "build_llm_batches",
     "build_llm_input",
+    "estimate_llm_batch_prompt_tokens",
+    "effective_llm_prompt_token_budget",
+    "llm_prompt_token_budget",
     "parse_enrichment_content",
     "request_generated_enrichment",
+    "request_generated_enrichment_for_documents",
     "request_generated_enrichment_with_retries",
 ]
 
@@ -65,11 +75,15 @@ DEFAULT_EMBED_BATCH_SIZE = 128
 DEFAULT_CHUNK_SIZE = 8192
 DEFAULT_CHUNK_OVERLAP = 128
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 8
-DEFAULT_LLM_BASE_URL = "http://localhost:8080/v1"
+DEFAULT_LLM_BASE_URL = "http://192.168.88.96:8000/v1"
 DEFAULT_LLM_API_KEY = "sk-bf-bifrost"
-DEFAULT_LLM_MODEL = "nvidia/regular"
-DEFAULT_LLM_RPM = 40
-DEFAULT_LLM_BATCH_SIZE = 8
+DEFAULT_LLM_MODEL = "Qwen/Qwen3.6-27B-FP8"
+DEFAULT_LLM_TOKENIZER_MODEL = "Qwen/Qwen3.6-27B"
+DEFAULT_LLM_CONTEXT_TOKENS = 131072
+DEFAULT_LLM_PROMPT_TOKEN_BUDGET = 14336
+DEFAULT_LLM_RPM = 240
+DEFAULT_LLM_BATCH_SIZE = 64
+DEFAULT_LLM_CONCURRENCY = 2
 DEFAULT_LLM_MAX_CHARS = 5000
 DEFAULT_LLM_TIMEOUT = 120
 DEFAULT_LLM_MAX_TOKENS = 4096
@@ -112,8 +126,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm-base-url", default=os.environ.get("TENANCY_LLM_BASE_URL", DEFAULT_LLM_BASE_URL))
     parser.add_argument("--llm-api-key", default=os.environ.get("TENANCY_LLM_API_KEY", DEFAULT_LLM_API_KEY))
     parser.add_argument("--llm-model", default=os.environ.get("TENANCY_LLM_MODEL", DEFAULT_LLM_MODEL))
+    parser.add_argument(
+        "--llm-tokenizer-model",
+        default=os.environ.get("TENANCY_LLM_TOKENIZER_MODEL", DEFAULT_LLM_TOKENIZER_MODEL),
+    )
+    parser.add_argument("--llm-context-tokens", type=int, default=DEFAULT_LLM_CONTEXT_TOKENS)
+    parser.add_argument(
+        "--llm-prompt-token-budget",
+        type=int,
+        default=DEFAULT_LLM_PROMPT_TOKEN_BUDGET,
+        help="Target prompt tokens per LLM request before output; tune to vLLM max batched tokens.",
+    )
     parser.add_argument("--llm-rpm", type=int, default=DEFAULT_LLM_RPM)
     parser.add_argument("--llm-batch-size", type=int, default=DEFAULT_LLM_BATCH_SIZE)
+    parser.add_argument("--llm-concurrency", type=int, default=DEFAULT_LLM_CONCURRENCY)
     parser.add_argument("--llm-max-chars", type=int, default=DEFAULT_LLM_MAX_CHARS)
     parser.add_argument("--llm-timeout", type=int, default=DEFAULT_LLM_TIMEOUT)
     parser.add_argument("--llm-max-tokens", type=int, default=DEFAULT_LLM_MAX_TOKENS)
@@ -406,8 +432,11 @@ def validate_args(args: argparse.Namespace) -> None:
         "embed_batch_size",
         "chunk_size",
         "model_embed_batch_size",
+        "llm_context_tokens",
+        "llm_prompt_token_budget",
         "llm_rpm",
         "llm_batch_size",
+        "llm_concurrency",
         "llm_max_chars",
         "llm_timeout",
         "llm_max_tokens",
@@ -479,8 +508,12 @@ def main() -> int:
                 base_url=args.llm_base_url,
                 api_key=args.llm_api_key,
                 model=args.llm_model,
+                tokenizer_model=args.llm_tokenizer_model,
+                context_tokens=args.llm_context_tokens,
+                prompt_token_budget=args.llm_prompt_token_budget,
                 rpm=args.llm_rpm,
                 batch_size=args.llm_batch_size,
+                concurrency=args.llm_concurrency,
                 max_chars=args.llm_max_chars,
                 timeout=args.llm_timeout,
                 max_tokens=args.llm_max_tokens,
