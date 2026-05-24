@@ -2,7 +2,7 @@ import { SearchClient } from "./SearchClient";
 
 export default function SearchPage() {
   return (
-    <main>
+    <main className="search-page">
       <header className="site-header" aria-label="Sunlight navigation">
         <a className="brand" href="/" aria-label="Sunlight home">
           Sunlight
@@ -21,10 +21,9 @@ export default function SearchPage() {
 
       <section className="search-hero">
         <div>
-          <p className="status-label">Semantic search for official information</p>
           <h1>Search Sunlight</h1>
           <p className="lede">
-            Ask source-cited questions across the public FYI.org.nz disclosure corpus indexed by Sunlight.
+            Ask source-cited questions across public FYI.org.nz disclosures indexed by Sunlight.
           </p>
         </div>
       </section>

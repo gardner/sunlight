@@ -315,6 +315,8 @@ Completed:
 * Added streamed search progress events to `/api/search` and updated the public
   search UI to show each stage as it runs: BM25 keyword search, query embedding,
   Vectorize search, hybrid fusion, citation selection, and answer generation.
+* Tightened the public search page layout so the heading, input, examples, and
+  compact progress grid fit much higher on a standard laptop viewport.
 
 ## Verification
 
@@ -474,6 +476,8 @@ pnpm test:ts apps/landing/lib/search.test.ts
 pnpm test:ts
 pnpm exec tsc --noEmit
 pnpm landing:build
+pnpm dlx playwright screenshot --viewport-size=1366,768 http://127.0.0.1:8787/search /tmp/sunlight-search-desktop-compact.png
+pnpm dlx playwright screenshot --viewport-size=390,844 http://127.0.0.1:8787/search /tmp/sunlight-search-mobile-compact.png
 ```
 
 ## Notes
