@@ -163,6 +163,30 @@ tables, layout, and long-term chunk quality. It is also the fairest input for
 hybrid evals because FYI and tribunal documents then pass through the same
 conversion family.
 
+Cloudflare Workers AI Markdown Conversion was tested as a comparison path using
+the documented `env.AI.toMarkdown` Worker binding. The direct REST endpoint
+returned `403 Authentication error` with the current project tokens, but a
+temporary Worker with the existing AI binding successfully converted PDFs.
+
+Sample output from `storage/evals/markdown_conversion/20260524T211438Z`:
+
+```text
+5825064-Tribunal_Order.pdf
+Docling:    8.190s, 13,447 chars, 2 tables, citation kept, date extracted
+Cloudflare: 0.214s, 11,957 chars, 0 tables, citation kept, date text joined
+
+172069933.pdf
+Docling:    4.458s, 4,683 chars, date extracted
+Cloudflare: 0.091s, 4,242 chars, date text joined
+```
+
+Cloudflare is dramatically faster and may be useful for triage, rough previews,
+or a managed comparison baseline. For the production Tenancy corpus, keep
+Docling as canonical because it preserved tribunal tables and separated
+decision structure more reliably in the samples. Cloudflare often joined page
+headers, body text, adjudicator names, and dates without whitespace, which makes
+deterministic metadata extraction weaker unless we add additional repair logic.
+
 CPU saturation during conversion is expected. Even with Docling, born-digital
 PDF loading, layout analysis, text extraction, and table reconstruction are
 heavily CPU-bound. GPU usage should mainly appear during embedding, OCR/model

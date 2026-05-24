@@ -320,6 +320,13 @@ Completed:
 * Smoke-tested one legacy PDF through Docling after deleting the text sidecars;
   RapidOCR selected GPU 0 and the generated frontmatter included
   `decision_date`, `nztt_citation`, `request_year`, and R2 keys.
+* Added a Cloudflare-vs-Docling markdown conversion comparison utility and a
+  temporary Worker AI binding proxy. Direct Cloudflare REST calls returned
+  `403`, but the Worker binding converted sample PDFs successfully.
+* Compared Cloudflare Workers AI Markdown Conversion against Docling on one
+  legacy and one current Tenancy PDF. Cloudflare was much faster on the sample
+  but flattened tables and joined decision-date text, so Docling remains the
+  canonical Tenancy converter for now.
 * Added `docs/AGENTIC_RAG.md` and an offline `scripts/eval_search.py --agentic`
   mode that analyzes query intent, records a retrieval plan, inspects first-pass
   evidence, and runs a bounded expansion pass only when exact or numeric
@@ -539,44 +546,46 @@ Important naming boundary:
 1. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-2. Run controlled Tenancy LLM enrichment batches, inspect generated summaries,
+2. Resume the legacy Tenancy Docling conversion and embedding run, then verify
+   idempotency and updated LanceDB row counts.
+3. Run controlled Tenancy LLM enrichment batches, inspect generated summaries,
    catchwords, questions, and legal principles, then decide whether to scale the
    resumable enrichment pass across all tenancy decisions.
-3. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
+4. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.
-4. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
+5. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
    existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
-5. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
+6. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
    enabling Tenancy in public search.
-6. Update the landing search API and UI for multi-source citations, labels, and
+7. Update the landing search API and UI for multi-source citations, labels, and
    source filters.
-7. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
-8. Choose the Hugging Face dataset repo id, visibility, and license wording,
+8. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
+9. Choose the Hugging Face dataset repo id, visibility, and license wording,
    then publish with the exporter upload command.
-9. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+10. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
    stays living; use full snapshots by default and delta exports when append-only
    updates are useful.
-10. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+11. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-11. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+12. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-12. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+13. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-13. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+14. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-14. Continue expanding the reviewed eval manifest, especially with more
+15. Continue expanding the reviewed eval manifest, especially with more
    numeric/table-heavy FYI records and additional production failures once
    search logs expose them.
-15. Add optional local vLLM answer generation and answer-grounding checks to the
+16. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-16. Add exact query response caching for `/api/search` to reduce repeated answer
+17. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-17. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+18. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-18. Do a controlled live Cloudflare Email Sending test before sending to real
+19. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-19. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+20. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
