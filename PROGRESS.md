@@ -319,6 +319,11 @@ Completed:
   137 requests, mean 7.3 decisions per request, median 7, and maximum 8.
 * Smoke-tested remote Qwen enrichment on two temporary Tenancy markdown copies;
   both enriched successfully with summaries, catchwords, and questions.
+* Ran a sustained remote Qwen enrichment test on 1,000 temporary Tenancy
+  markdown copies using `--llm-concurrency 2`: 999 pending files enriched, 0
+  failures, 136 LLM requests, 47.57 minutes elapsed, about 21.0 documents/minute
+  and 2.86 requests/minute. One copied markdown file already had the current
+  enrichment marker before the run, so it was skipped.
 * Analyzed the legacy Tenancy scrape in `justice/data/tenancy/legacy/pdf`:
   11,476 PDFs, exact signature dates for 11,411, 65 fallback dates, and no gap
   before the current scrape because legacy runs through 2023-07-07 while the
@@ -573,10 +578,11 @@ Important naming boundary:
 2. Resume the legacy Tenancy Docling conversion and embedding run for the
    remaining 11,474 PDFs, budgeting roughly 6-8 hours with `--skip-llm`, then
    verify idempotency and updated LanceDB row counts.
-3. Benchmark controlled Tenancy LLM enrichment batches at `--llm-concurrency 2`
-   and `--llm-concurrency 4`, inspect generated summaries, catchwords,
-   questions, and legal principles, then decide whether to scale the resumable
-   enrichment pass across all tenancy decisions.
+3. Benchmark controlled Tenancy LLM enrichment at `--llm-concurrency 4`, compare
+   throughput and error rate against the clean concurrency-2 result, inspect
+   generated summaries, catchwords, questions, and legal principles, then
+   decide whether to scale the resumable enrichment pass across all tenancy
+   decisions.
 4. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.

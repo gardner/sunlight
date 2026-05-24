@@ -162,6 +162,23 @@ budget: mean 7.3 decisions per request, median 7, and maximum 8. The default
 LLM concurrency is 2; use `--llm-concurrency 4` as the first throughput
 benchmark override.
 
+A sustained concurrency-2 test on 1,000 temporary Tenancy markdown copies
+completed cleanly:
+
+```text
+999 pending files enriched
+0 failures
+136 LLM requests
+47.57 minutes elapsed
+21.0 documents/minute
+2.86 requests/minute
+```
+
+One copied markdown file already had the current enrichment marker before the
+test run, so it was skipped. The next tuning test should run the same temporary
+copy workflow with `--llm-concurrency 4` and compare throughput, error rate,
+and generated metadata quality.
+
 ## Converter Decision
 
 Use Docling as the canonical production converter for Tenancy Tribunal PDFs.
@@ -698,9 +715,10 @@ prompt version
 5. Done: run Docling smoke tests, inspect output, and reject the scratch
    MarkItDown path as production input.
 6. Done: embed the full Tenancy corpus into LanceDB with Qwen3.
-7. Next: benchmark controlled LLM enrichment batches at concurrency 2 and 4
-   using the Qwen-tokenized 14,336-token prompt budget, then inspect summaries,
-   catchwords, legal principles, and questions answered.
+7. Next: benchmark controlled LLM enrichment at concurrency 4 using the
+   Qwen-tokenized 14,336-token prompt budget, compare it with the clean
+   concurrency-2 result, then inspect summaries, catchwords, legal principles,
+   and questions answered.
 8. Next: run Tenancy evals comparing source-only retrieval against generated
    retrieval views before public search export.
 9. Next: export Tenancy vectors to the corpus Vectorize index with citation
