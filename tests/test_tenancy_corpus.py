@@ -117,6 +117,27 @@ class TenancyCorpusTests(unittest.TestCase):
 
         self.assertEqual([doc.metadata["tenancy_order_id"] for doc in documents], ["100", "102"])
 
+    def test_discover_legacy_tenancy_documents_normalizes_pdf_filenames(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_dir = Path(tmp_dir)
+            (pdf_dir / "5825064-Tribunal_Order.pdf").write_bytes(b"%PDF-1.4")
+            (pdf_dir / "5916404-UTA_Tribunal_Order.pdf").write_bytes(b"%PDF-1.4")
+            (pdf_dir / "not-a-tribunal-file.pdf").write_bytes(b"%PDF-1.4")
+
+            documents = module.discover_legacy_tenancy_documents(pdf_dir)
+
+        self.assertEqual(len(documents), 2)
+        document = documents[0]
+        self.assertEqual(document.pdf_path.name, "5825064-Tribunal_Order.pdf")
+        self.assertEqual(document.metadata["document_id"], "doc_justice_tenancy_legacy_5825064")
+        self.assertEqual(document.metadata["tenancy_order_id"], "5825064")
+        self.assertEqual(document.metadata["source_collection"], "justice_tenancy_legacy")
+        self.assertEqual(document.metadata["source_url"], "https://forms.justice.govt.nz/search/Documents/TTV2/PDF/5825064-Tribunal_Order.pdf")
+        self.assertEqual(document.metadata["request_title"], "Tenancy Tribunal legacy order 5825064")
+        self.assertNotIn("decision_date", document.metadata)
+        self.assertEqual(documents[1].metadata["tenancy_order_id"], "5916404")
+
     def test_needs_docling_conversion_rejects_markitdown_or_old_pipeline_output(self):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -204,6 +225,65 @@ Those details must not be published.
         self.assertIn("tenancy_address", enrichment["suppressed_fields"])
         self.assertEqual(enrichment["privacy_sensitivity"], "high")
         self.assertTrue(enrichment["requires_redaction_check"])
+
+    def test_enrichment_extracts_decision_date_from_signature_line(self):
+        module = load_module()
+        body = """
+[2020] NZTT Wellington 4243413
+
+TENANCY TRIBUNAL AT Wellington
+
+ORDER
+
+A Henwood
+17 August 2020
+
+Please read carefully:
+
+Rehearings
+"""
+
+        enrichment = module.deterministic_enrichment(body)
+
+        self.assertEqual(enrichment["decision_date"], "2020-08-17")
+
+    def test_enrichment_extracts_decision_date_when_docling_joins_signature_line(self):
+        module = load_module()
+        body = """
+## [2020] NZTT Wellington 4243413
+
+Some reasons.
+
+A Henwood 17 August 2020
+
+## Please read carefully:
+"""
+
+        enrichment = module.deterministic_enrichment(body)
+
+        self.assertEqual(enrichment["decision_date"], "2020-08-17")
+        self.assertEqual(enrichment["nztt_citation"], "[2020] NZTT Wellington 4243413")
+
+    def test_finalize_metadata_fills_year_keys_after_date_enrichment(self):
+        module = load_module()
+        metadata = {
+            "document_id": "doc_justice_tenancy_legacy_5825064",
+            "tenancy_order_id": "5825064",
+            "decision_date": "2020-08-17",
+            "request_title": "Tenancy Tribunal legacy order 5825064",
+        }
+
+        finalized = module.finalize_tenancy_metadata(metadata)
+
+        self.assertEqual(finalized["request_year"], 2020)
+        self.assertEqual(
+            finalized["pdf_r2_key"],
+            "canonical/justice/tenancy/v1/pdf/2020/5825064.pdf",
+        )
+        self.assertEqual(
+            finalized["markdown_r2_key"],
+            "markdown/justice/tenancy/v1/2020/doc_justice_tenancy_legacy_5825064.md",
+        )
 
     def test_build_retrieval_documents_adds_generated_metadata_views(self):
         module = load_module()

@@ -26,6 +26,8 @@ class IngestTenancyTests(unittest.TestCase):
         args = module.build_parser().parse_args([])
 
         self.assertEqual(args.pdf_dir, Path("justice/data/tenancy/pdfs"))
+        self.assertEqual(args.legacy_pdf_dir, Path("justice/data/tenancy/legacy/pdf"))
+        self.assertFalse(args.include_legacy)
         self.assertEqual(args.markdown_dir, Path("storage/justice/tenancy/markdown_docling"))
         self.assertEqual(args.persist_dir, Path("storage/justice/tenancy/lancedb"))
         self.assertEqual(args.convert_gpu, "0")
@@ -34,6 +36,23 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(args.llm_rpm, 40)
         self.assertEqual(args.llm_timeout, 120)
         self.assertEqual(args.llm_max_tokens, 4096)
+
+    def test_include_legacy_flag_is_opt_in(self):
+        module = load_module()
+
+        args = module.build_parser().parse_args(["--include-legacy"])
+
+        self.assertTrue(args.include_legacy)
+
+    def test_discovery_message_reports_legacy_count_when_enabled(self):
+        module = load_module()
+
+        message = module.discovery_message(12, 5, True)
+
+        self.assertEqual(
+            message,
+            "Discovered 12 Tenancy Tribunal PDFs (5 legacy PDFs included).",
+        )
 
     def test_embedded_marker_path_is_pipeline_specific(self):
         module = load_module()

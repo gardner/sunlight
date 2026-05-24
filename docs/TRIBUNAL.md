@@ -45,6 +45,30 @@ Corpus counts from the current local scrape:
 3,656 Tenancy Tribunal 2026
 ```
 
+Legacy scrape coverage:
+
+```text
+justice/data/tenancy/legacy/pdf/
+
+11,476 legacy PDFs
+11,411 exact signature dates extracted from the legacy text sidecars
+7      fallback dates from standalone date lines
+58     citation-year-only fallbacks used for coverage analysis
+
+Legacy date range: 2020-01-01 fallback through 2023-07-07
+Current deduped scrape range: 2021-05-20 through 2026-04-16
+```
+
+There is no gap between the last legacy scrape date and the current scrape.
+The current corpus has a continuous 2023 run beginning on 2023-05-20, while
+the legacy scrape continues through 2023-07-07, so the two sources overlap in
+May-July 2023. The current scrape also has 49 deduped decisions from
+2021-05-20, but does not cover the 2021-05-21 to 2023-05-19 period without
+the legacy PDFs.
+
+After recording this coverage, the old legacy `.txt*` extraction sidecars were
+deleted. Legacy ingestion now uses the original PDFs and Docling conversion.
+
 The sampled decisions contain useful retrieval and metadata signals:
 
 * formal citation lines such as `[2026] NZTT 5380224`
@@ -78,10 +102,15 @@ Implemented:
 * `scripts/tenancy_corpus.py` discovers Tenancy PDF/JSON sidecars, dedupes by
   `pdf_url`, builds stable `doc_justice_tenancy_<order_id>` document IDs, and
   emits canonical tribunal metadata.
+* `scripts/tenancy_corpus.py` also has a legacy PDF adapter for
+  `justice/data/tenancy/legacy/pdf`. It builds stable
+  `doc_justice_tenancy_legacy_<order_id>` document IDs and reconstructs the
+  Justice PDF URL from the legacy filename.
 * `scripts/ingest_tenancy.py` converts with Docling, writes Docling markdown to
   `storage/justice/tenancy/markdown_docling`, enriches deterministic metadata,
   optionally enriches generated retrieval metadata through the local
   OpenAI-compatible LLM endpoint, and embeds into LanceDB with Qwen3.
+  Legacy ingestion is opt-in with `--include-legacy`.
 * The LanceDB writer and Vectorize/BM25 exporters preserve source-aware fields
   such as `source_type`, `retrieval_view`, `canonical_document_id`,
   `source_page_url`, Tenancy IDs, citation/date fields, issue tags, and statute
@@ -97,6 +126,14 @@ Completed local import:
 32,378 Docling markdown files written
 32,378 embedding markers written
 412,537 LanceDB chunk rows in storage/justice/tenancy/lancedb/chunks_v2
+```
+
+Legacy import status:
+
+```text
+11,476 legacy PDFs normalized
+1 legacy PDF smoke-tested through Docling after deleting old text sidecars
+0 legacy PDFs converted in the main markdown directory before the full legacy run
 ```
 
 The full run used Docling and Qwen embeddings with GPU 0. Docling/RapidOCR logs

@@ -16,7 +16,9 @@ from tenancy_corpus import (
     SOURCE,
     build_retrieval_documents,
     deterministic_enrichment,
+    discover_legacy_tenancy_documents,
     discover_tenancy_documents,
+    finalize_tenancy_metadata,
     markdown_path_for_document,
     merge_enrichment,
     needs_docling_conversion,
@@ -50,6 +52,7 @@ __all__ = [
 
 
 DEFAULT_PDF_DIR = Path("justice/data/tenancy/pdfs")
+DEFAULT_LEGACY_PDF_DIR = Path("justice/data/tenancy/legacy/pdf")
 DEFAULT_MARKDOWN_DIR = Path("storage/justice/tenancy/markdown_docling")
 DEFAULT_TABLES_DIR = Path("storage/justice/tenancy/tables")
 DEFAULT_PERSIST_DIR = Path("storage/justice/tenancy/lancedb")
@@ -85,6 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR)
+    parser.add_argument("--legacy-pdf-dir", type=Path, default=DEFAULT_LEGACY_PDF_DIR)
+    parser.add_argument("--include-legacy", action="store_true")
     parser.add_argument("--markdown-dir", type=Path, default=DEFAULT_MARKDOWN_DIR)
     parser.add_argument("--tables-dir", type=Path, default=DEFAULT_TABLES_DIR)
     parser.add_argument("--persist-dir", type=Path, default=DEFAULT_PERSIST_DIR)
@@ -179,6 +184,7 @@ def conversion_task(document, markdown_dir: Path, force: bool) -> dict[str, obje
     result = converter.convert(str(document.pdf_path))
     body = result.document.export_to_markdown()
     metadata = merge_enrichment(metadata, deterministic_enrichment(body))
+    metadata = finalize_tenancy_metadata(metadata)
     markdown_path.write_text(render_tenancy_markdown(metadata, body), encoding="utf-8")
     return {
         "status": "converted",
@@ -410,9 +416,32 @@ def validate_args(args: argparse.Namespace) -> None:
             raise SystemExit(f"--{flag.replace('_', '-')} must be at least 1")
     if not args.pdf_dir.exists():
         raise SystemExit(f"Tenancy PDF directory not found: {args.pdf_dir}")
+    if args.include_legacy and not args.legacy_pdf_dir.exists():
+        raise SystemExit(f"Legacy Tenancy PDF directory not found: {args.legacy_pdf_dir}")
     args.markdown_dir.mkdir(parents=True, exist_ok=True)
     args.tables_dir.mkdir(parents=True, exist_ok=True)
     args.persist_dir.mkdir(parents=True, exist_ok=True)
+
+
+def discover_documents(args: argparse.Namespace):
+    documents = discover_tenancy_documents(args.pdf_dir)
+    legacy_count = 0
+    if args.include_legacy:
+        legacy_documents = discover_legacy_tenancy_documents(args.legacy_pdf_dir)
+        legacy_count = len(legacy_documents)
+        documents.extend(legacy_documents)
+    if args.limit:
+        documents = documents[: args.limit]
+    return documents, legacy_count
+
+
+def discovery_message(document_count: int, legacy_count: int, include_legacy: bool) -> str:
+    if include_legacy:
+        return (
+            f"Discovered {document_count} Tenancy Tribunal PDFs "
+            f"({legacy_count} legacy PDFs included)."
+        )
+    return f"Discovered {document_count} unique Tenancy Tribunal PDFs."
 
 
 def main() -> int:
@@ -420,10 +449,8 @@ def main() -> int:
     validate_args(args)
     mp.set_start_method("spawn", force=True)
 
-    documents = discover_tenancy_documents(args.pdf_dir)
-    if args.limit:
-        documents = documents[: args.limit]
-    print(f"Discovered {len(documents)} unique Tenancy Tribunal PDFs.", flush=True)
+    documents, legacy_count = discover_documents(args)
+    print(discovery_message(len(documents), legacy_count, args.include_legacy), flush=True)
 
     if not args.skip_convert:
         started = time.time()

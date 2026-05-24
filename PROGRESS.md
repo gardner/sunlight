@@ -308,6 +308,18 @@ Completed:
 * Left full-corpus LLM enrichment as a separate resumable batch because the
   local `nvidia/regular` model produced usable JSON but was too slow for the
   full 32k-document pass.
+* Analyzed the legacy Tenancy scrape in `justice/data/tenancy/legacy/pdf`:
+  11,476 PDFs, exact signature dates for 11,411, 65 fallback dates, and no gap
+  before the current scrape because legacy runs through 2023-07-07 while the
+  current continuous 2023 scrape begins on 2023-05-20.
+* Added opt-in legacy Tenancy ingestion support that normalizes legacy PDF
+  filenames to `doc_justice_tenancy_legacy_<order_id>` documents and uses
+  Docling output, not the old text sidecars, for deterministic date metadata.
+* Deleted 11,478 old legacy Tenancy `.txt*` extraction files after recording
+  date coverage; 11,476 legacy PDFs remain for Docling conversion.
+* Smoke-tested one legacy PDF through Docling after deleting the text sidecars;
+  RapidOCR selected GPU 0 and the generated frontmatter included
+  `decision_date`, `nztt_citation`, `request_year`, and R2 keys.
 * Added `docs/AGENTIC_RAG.md` and an offline `scripts/eval_search.py --agentic`
   mode that analyzes query intent, records a retrieval plan, inspects first-pass
   evidence, and runs a bounded expansion pass only when exact or numeric
@@ -529,7 +541,7 @@ Important naming boundary:
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
 2. Run controlled Tenancy LLM enrichment batches, inspect generated summaries,
    catchwords, questions, and legal principles, then decide whether to scale the
-   resumable enrichment pass across all 32k decisions.
+   resumable enrichment pass across all tenancy decisions.
 3. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.

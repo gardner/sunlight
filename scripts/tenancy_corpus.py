@@ -15,6 +15,12 @@ SOURCE_TYPE = "tribunal_decision"
 AUTHORITY_NAME = "Tenancy Tribunal"
 AUTHORITY_SLUG = "tenancy-tribunal"
 AUTHORITY_CATEGORY = "Tribunal"
+LEGACY_SOURCE_COLLECTION = "justice_tenancy_legacy"
+JUSTICE_PDF_BASE_URL = "https://forms.justice.govt.nz/search/Documents/TTV2/PDF"
+LEGACY_PDF_NAME_RE = re.compile(
+    r"^(?P<order_id>\d+)-(?P<title>(?:Tenancy_|UTA_)?Tribunal_Order(?:_Redacted)?)\.pdf$",
+    flags=re.IGNORECASE,
+)
 
 
 class TenancyDocument:
@@ -75,8 +81,19 @@ def discover_tenancy_documents(pdf_dir: Path) -> list[TenancyDocument]:
     return documents
 
 
+def discover_legacy_tenancy_documents(pdf_dir: Path) -> list[TenancyDocument]:
+    documents: list[TenancyDocument] = []
+    for pdf_path in sorted(pdf_dir.glob("*.pdf"), key=sort_key_for_path):
+        metadata = build_legacy_tenancy_metadata(pdf_path)
+        if metadata is None:
+            continue
+        documents.append(TenancyDocument(pdf_path, pdf_path, metadata))
+    return documents
+
+
 def sort_key_for_path(path: Path) -> tuple[int, str]:
-    return (int(path.stem), path.name) if path.stem.isdigit() else (10**18, path.name)
+    leading_id = path.stem.split("-", 1)[0]
+    return (int(leading_id), path.name) if leading_id.isdigit() else (10**18, path.name)
 
 
 def build_tenancy_metadata(sidecar: dict[str, Any], sidecar_path: Path) -> dict[str, object]:
@@ -115,12 +132,62 @@ def build_tenancy_metadata(sidecar: dict[str, Any], sidecar_path: Path) -> dict[
         "mbie_order": bool(sidecar.get("mbie_order")),
         "downloaded_at": sidecar.get("downloaded_at"),
     }
-    if request_year is not None:
-        metadata["pdf_r2_key"] = f"canonical/justice/tenancy/v1/pdf/{request_year}/{order_id}.pdf"
-        metadata["markdown_r2_key"] = (
-            f"markdown/justice/tenancy/v1/{request_year}/{document_id}.md"
-        )
+    return finalize_tenancy_metadata(metadata)
+
+
+def build_legacy_tenancy_metadata(pdf_path: Path) -> dict[str, object] | None:
+    match = LEGACY_PDF_NAME_RE.match(pdf_path.name)
+    if not match:
+        return None
+
+    order_id = match.group("order_id")
+    document_id = f"doc_justice_tenancy_legacy_{order_id}"
+    metadata: dict[str, object] = {
+        "document_id": document_id,
+        "source": SOURCE,
+        "source_type": SOURCE_TYPE,
+        "source_collection": LEGACY_SOURCE_COLLECTION,
+        "authority_name": AUTHORITY_NAME,
+        "authority_slug": AUTHORITY_SLUG,
+        "authority_category": AUTHORITY_CATEGORY,
+        "request_title": f"Tenancy Tribunal legacy order {order_id}",
+        "source_url": f"{JUSTICE_PDF_BASE_URL}/{pdf_path.name}",
+        "source_page_url": None,
+        "original_filename": pdf_path.name,
+        "parser": "docling",
+        "pipeline_version": PIPELINE_VERSION,
+        "tribunal": AUTHORITY_NAME,
+        "jurisdiction": "NZ",
+        "tenancy_order_id": order_id,
+        "legacy_scrape": True,
+    }
     return metadata
+
+
+def finalize_tenancy_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    finalized = dict(metadata)
+    request_year = (
+        as_int(finalized.get("request_year"))
+        or year_from_date(as_str(finalized.get("decision_date")))
+        or year_from_date(as_str(finalized.get("published_date")))
+        or as_int(finalized.get("extracted_decision_year"))
+        or year_from_category(finalized.get("category"))
+    )
+    if request_year is not None:
+        finalized["request_year"] = request_year
+
+    order_id = as_str(finalized.get("tenancy_order_id"))
+    document_id = as_str(finalized.get("document_id"))
+    if request_year is not None and order_id and document_id:
+        finalized.setdefault(
+            "pdf_r2_key",
+            f"canonical/justice/tenancy/v1/pdf/{request_year}/{order_id}.pdf",
+        )
+        finalized.setdefault(
+            "markdown_r2_key",
+            f"markdown/justice/tenancy/v1/{request_year}/{document_id}.md",
+        )
+    return finalized
 
 
 def build_request_title(sidecar: dict[str, Any], decision_date: str | None) -> str:
@@ -144,11 +211,26 @@ def public_case_name(value: object) -> str | None:
     return stripped
 
 
+def as_str(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def as_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_date(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     raw = value.strip()
-    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d %B %Y"):
         try:
             return datetime.strptime(raw, fmt).date().isoformat()
         except ValueError:
@@ -205,6 +287,8 @@ def deterministic_enrichment(body: str) -> dict[str, object]:
     suppression = suppression_metadata(lower)
     enrichment: dict[str, object] = {
         "nztt_citation": extract_nztt_citation(body),
+        "decision_date": extract_decision_date(body),
+        "extracted_decision_year": extract_nztt_year(body),
         "tribunal_location": extract_tribunal_location(body),
         "statute_sections": extract_statute_sections(body),
         "legal_issue_tags": extract_controlled_tags(lower),
@@ -225,8 +309,60 @@ def merge_enrichment(metadata: dict[str, object], enrichment: dict[str, object])
 
 
 def extract_nztt_citation(body: str) -> str | None:
-    match = re.search(r"\[\d{4}\]\s+NZTT\s+\d+", body, flags=re.IGNORECASE)
-    return match.group(0).replace("nztt", "NZTT") if match else None
+    match = re.search(
+        r"\[\d{4}\][^\S\r\n]+NZTT(?:[^\S\r\n]+[A-Za-z][A-Za-z /'-]+)?[^\S\r\n]+\d[\d, ]*",
+        body,
+        flags=re.IGNORECASE,
+    )
+    return " ".join(match.group(0).replace("nztt", "NZTT").split()) if match else None
+
+
+def extract_nztt_year(body: str) -> int | None:
+    match = re.search(r"\[(20\d{2})\]\s+NZTT", body, flags=re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def extract_decision_date(body: str) -> str | None:
+    prefix = body.split("Please read carefully:", 1)[0]
+    tail = "\n".join(prefix.splitlines()[-30:])
+    candidates = extract_long_dates(tail)
+    if candidates:
+        return candidates[-1]
+
+    candidates = extract_standalone_long_dates(body)
+    return candidates[-1] if candidates else None
+
+
+def extract_long_dates(text: str) -> list[str]:
+    month_names = (
+        "January|February|March|April|May|June|July|August|"
+        "September|October|November|December"
+    )
+    dates: list[str] = []
+    for match in re.finditer(
+        rf"\b([0-3]?\d\s+(?:{month_names})\s+20\d{{2}})\b",
+        text,
+    ):
+        normalized = normalize_date(match.group(1))
+        if normalized:
+            dates.append(normalized)
+    return dates
+
+
+def extract_standalone_long_dates(text: str) -> list[str]:
+    month_names = (
+        "January|February|March|April|May|June|July|August|"
+        "September|October|November|December"
+    )
+    dates: list[str] = []
+    for match in re.finditer(
+        rf"(?m)^\s*([0-3]?\d\s+(?:{month_names})\s+20\d{{2}})\s*$",
+        text,
+    ):
+        normalized = normalize_date(match.group(1))
+        if normalized:
+            dates.append(normalized)
+    return dates
 
 
 def extract_tribunal_location(body: str) -> str | None:
