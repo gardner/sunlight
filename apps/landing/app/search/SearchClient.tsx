@@ -1,12 +1,16 @@
 "use client";
 
 import { CheckCircle2, CircleDashed, ExternalLink, LoaderCircle, Search } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   type SearchProgressStage,
   type SearchStreamEvent,
   parseSearchStreamLines,
 } from "../../lib/search";
+import {
+  EVAL_EXAMPLE_QUESTIONS,
+  selectRandomExampleQuestions,
+} from "../../lib/search-examples";
 
 interface SearchCitation {
   authorityName?: string;
@@ -27,18 +31,19 @@ interface SearchResponse {
   stages?: SearchProgressStage[];
 }
 
-const EXAMPLE_QUESTIONS = [
-  "What information has been released about council leisure centre contracts?",
-  "Which records mention proactive release processes?",
-  "What do the sources say about official information response delays?",
-];
-
 export function SearchClient() {
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [error, setError] = useState("");
+  const [exampleQuestions, setExampleQuestions] = useState(() =>
+    EVAL_EXAMPLE_QUESTIONS.slice(0, 3),
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [stages, setStages] = useState<SearchProgressStage[]>([]);
+
+  useEffect(() => {
+    setExampleQuestions(selectRandomExampleQuestions(EVAL_EXAMPLE_QUESTIONS));
+  }, []);
 
   async function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -117,13 +122,14 @@ export function SearchClient() {
           </button>
         </div>
         <div className="example-queries" aria-label="Example questions">
-          {EXAMPLE_QUESTIONS.map((example) => (
+          {exampleQuestions.map((example) => (
             <button
               key={example}
               onClick={() => {
                 setQuestion(example);
                 setError("");
               }}
+              title={example}
               type="button"
             >
               {example}

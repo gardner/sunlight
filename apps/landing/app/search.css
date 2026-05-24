@@ -20,6 +20,7 @@
   gap: 16px;
   margin: 0 auto;
   max-width: 1120px;
+  min-width: 0;
   padding: 0 32px 72px;
 }
 
@@ -42,6 +43,7 @@
   border-radius: 8px;
   display: grid;
   gap: 12px;
+  min-width: 0;
   padding: 18px;
 }
 
@@ -56,6 +58,7 @@
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
 }
 
 .search-box textarea {
@@ -65,6 +68,7 @@
   color: #161d1f;
   font: inherit;
   line-height: 1.5;
+  min-width: 0;
   min-height: 96px;
   padding: 12px;
   resize: vertical;
@@ -107,6 +111,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .example-queries button {
@@ -115,11 +120,17 @@
   border-radius: 4px;
   color: #163031;
   cursor: pointer;
+  flex: 1 1 280px;
   font: inherit;
   font-size: 13px;
   line-height: 1.35;
+  max-width: min(100%, 420px);
+  min-width: 0;
+  overflow: hidden;
   padding: 7px 9px;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .example-queries button:hover {
@@ -312,7 +323,8 @@
   }
 
   .search-submit {
-    min-width: 100%;
+    min-width: 0;
+    width: 100%;
   }
 
   .search-stages {

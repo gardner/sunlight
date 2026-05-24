@@ -317,6 +317,8 @@ Completed:
   Vectorize search, hybrid fusion, citation selection, and answer generation.
 * Tightened the public search page layout so the heading, input, examples, and
   compact progress grid fit much higher on a standard laptop viewport.
+* Replaced the hard-coded search example chips with a random three-question
+  rotation drawn from the reviewed FYI eval questions on each page load.
 
 ## Verification
 
@@ -478,6 +480,7 @@ pnpm exec tsc --noEmit
 pnpm landing:build
 pnpm dlx playwright screenshot --viewport-size=1366,768 http://127.0.0.1:8787/search /tmp/sunlight-search-desktop-compact.png
 pnpm dlx playwright screenshot --viewport-size=390,844 http://127.0.0.1:8787/search /tmp/sunlight-search-mobile-compact.png
+pnpm test:ts apps/landing/lib/search-examples.test.ts apps/landing/lib/search.test.ts
 ```
 
 ## Notes
