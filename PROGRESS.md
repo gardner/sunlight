@@ -390,6 +390,12 @@ Completed:
   seconds, making full-corpus enrichment multi-day at current throughput.
   `groq/regular-groq` followed the schema quickly, but its 8k TPM limit makes
   it unsuitable for useful full-corpus batching.
+* Copied the active Bifrost gateway setup into `bifrost/` with a repo-local
+  Docker Compose wrapper, ignored local `.env`, debug JSON logging, and
+  environment-referenced provider plus virtual keys. Verified the debug gateway
+  boots on `localhost:8081`, lists 22 models, and routes minimal chat probes
+  through NVIDIA, Groq, OpenRouter free, and OpenRouter paid without invoking
+  fallbacks.
 
 ## Verification
 
@@ -552,6 +558,8 @@ pnpm landing:build
 pnpm dlx playwright screenshot --viewport-size=1366,768 http://127.0.0.1:8787/search /tmp/sunlight-search-desktop-compact.png
 pnpm dlx playwright screenshot --viewport-size=390,844 http://127.0.0.1:8787/search /tmp/sunlight-search-mobile-compact.png
 pnpm test:ts apps/landing/lib/search-examples.test.ts apps/landing/lib/search.test.ts
+docker compose -f bifrost/docker-compose.yml --env-file bifrost/.env config --quiet
+curl -s http://127.0.0.1:8081/v1/models
 ```
 
 ## Notes
@@ -595,51 +603,55 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
+1. Replay representative slow Tenancy enrichment requests through the repo-local
+   debug Bifrost gateway on `localhost:8081`, then inspect provider, status,
+   duration, and fallback logs before changing route priorities or disabling a
+   failing provider.
+2. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-2. Resume Tenancy embedding for the converted legacy markdown with
+3. Resume Tenancy embedding for the converted legacy markdown with
    `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
    updated LanceDB row counts.
-3. Decide the production LLM enrichment route before running full-corpus
+4. Decide the production LLM enrichment route before running full-corpus
    Tenancy enrichment: either bring the Qwen/vLLM host at `192.168.88.96:8000`
    back online, accept multi-day `nvidia/regular-nvidia` Responses API
    throughput, or provision a faster structured-output local model.
-4. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
+5. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.
-5. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
+6. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
    existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
-6. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
+7. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
    enabling Tenancy in public search.
-7. Update the landing search API and UI for multi-source citations, labels, and
+8. Update the landing search API and UI for multi-source citations, labels, and
    source filters.
-8. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
-9. Choose the Hugging Face dataset repo id, visibility, and license wording,
+9. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
+10. Choose the Hugging Face dataset repo id, visibility, and license wording,
    then publish with the exporter upload command.
-10. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+11. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
    stays living; use full snapshots by default and delta exports when append-only
    updates are useful.
-11. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+12. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-12. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+13. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-13. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+14. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-14. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+15. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-15. Continue expanding the reviewed eval manifest, especially with more
+16. Continue expanding the reviewed eval manifest, especially with more
    numeric/table-heavy FYI records and additional production failures once
    search logs expose them.
-16. Add optional local vLLM answer generation and answer-grounding checks to the
+17. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-17. Add exact query response caching for `/api/search` to reduce repeated answer
+18. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-18. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+19. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-19. Do a controlled live Cloudflare Email Sending test before sending to real
+20. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-20. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+21. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.

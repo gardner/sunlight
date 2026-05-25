@@ -1,0 +1,22 @@
+services:
+  bifrost:
+    image: maximhq/bifrost:latest
+    ports:
+      - "${BIFROST_HTTP_PORT:-8081}:8080"
+    env_file:
+      - .env
+    environment:
+      BIFROST_HOST: 0.0.0.0
+      BIFROST_PORT: "8080"
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8080"
+      APP_DIR: /app/data
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      LOG_STYLE: ${LOG_STYLE:-json}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+      - ./config.json:/app/data/config.json:ro
+    restart: unless-stopped

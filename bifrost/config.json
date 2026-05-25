@@ -1,0 +1,229 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "plugins": [],
+  "providers": {
+    "nvidia": {
+      "keys": [
+        {
+          "name": "default",
+          "value": "env.NVIDIA_API_KEY",
+          "models": [
+            "fast-nvidia",
+            "regular-nvidia",
+            "reasoning-nvidia",
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+            "nvidia/nemotron-3-super-120b-a12b",
+            "deepseek-ai/deepseek-v4-pro"
+          ],
+          "weight": 1.0,
+          "aliases": {
+            "fast-nvidia": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+            "regular-nvidia": "nvidia/nemotron-3-super-120b-a12b",
+            "reasoning-nvidia": "deepseek-ai/deepseek-v4-pro"
+          }
+        }
+      ],
+      "network_config": {
+        "base_url": "https://integrate.api.nvidia.com",
+        "default_request_timeout_in_seconds": 300,
+        "stream_idle_timeout_in_seconds": 300
+      },
+      "custom_provider_config": {
+        "base_provider_type": "openai"
+      }
+    },
+    "openrouter": {
+      "keys": [
+        {
+          "name": "free",
+          "value": "env.OPENROUTER_API_KEY",
+          "models": [
+            "fast-openrouter",
+            "regular-openrouter",
+            "reasoning-openrouter",
+            "nvidia/nemotron-3-nano-30b-a3b:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "poolside/laguna-m.1:free"
+          ],
+          "weight": 1.0,
+          "aliases": {
+            "fast-openrouter": "nvidia/nemotron-3-nano-30b-a3b:free",
+            "regular-openrouter": "nvidia/nemotron-3-super-120b-a12b:free",
+            "reasoning-openrouter": "poolside/laguna-m.1:free"
+          }
+        }
+      ],
+      "network_config": {
+        "extra_headers": {
+          "HTTP-Referer": "https://pdf.krr.app",
+          "X-Title": "PDF to Podcast"
+        },
+        "default_request_timeout_in_seconds": 300,
+        "stream_idle_timeout_in_seconds": 300
+      }
+    },
+    "openrouter-paid": {
+      "keys": [
+        {
+          "name": "default",
+          "value": "env.OPENROUTER_API_KEY",
+          "models": [
+            "fast-openrouter-paid",
+            "regular-openrouter-paid",
+            "reasoning-openrouter-paid",
+            "deepseek/deepseek-v4-flash",
+            "deepseek/deepseek-v4-pro"
+          ],
+          "weight": 1.0,
+          "aliases": {
+            "fast-openrouter-paid": "deepseek/deepseek-v4-flash",
+            "regular-openrouter-paid": "deepseek/deepseek-v4-pro",
+            "reasoning-openrouter-paid": "deepseek/deepseek-v4-pro"
+          }
+        }
+      ],
+      "network_config": {
+        "base_url": "https://openrouter.ai/api",
+        "extra_headers": {
+          "HTTP-Referer": "https://pdf.krr.app",
+          "X-Title": "PDF to Podcast"
+        },
+        "default_request_timeout_in_seconds": 300,
+        "stream_idle_timeout_in_seconds": 300
+      },
+      "custom_provider_config": {
+        "base_provider_type": "openai"
+      }
+    },
+    "groq": {
+      "keys": [
+        {
+          "name": "default",
+          "value": "env.GROQ_API_KEY",
+          "models": [
+            "fast-groq",
+            "regular-groq",
+            "reasoning-groq",
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b"
+          ],
+          "weight": 1.0,
+          "aliases": {
+            "fast-groq": "openai/gpt-oss-20b",
+            "regular-groq": "openai/gpt-oss-120b",
+            "reasoning-groq": "openai/gpt-oss-120b"
+          }
+        }
+      ],
+      "network_config": {
+        "default_request_timeout_in_seconds": 300,
+        "stream_idle_timeout_in_seconds": 300
+      }
+    }
+  },
+  "governance": {
+    "rate_limits": [
+      {
+        "id": "rl-nvidia",
+        "request_max_limit": 40,
+        "request_reset_duration": "1m"
+      },
+      {
+        "id": "rl-openrouter-rpm",
+        "request_max_limit": 20,
+        "request_reset_duration": "1m"
+      },
+      {
+        "id": "rl-openrouter-paid-rpm",
+        "request_max_limit": 60,
+        "request_reset_duration": "1m"
+      },
+      {
+        "id": "rl-openrouter-day",
+        "request_max_limit": 1000,
+        "request_reset_duration": "1d",
+        "calendar_aligned": true
+      },
+      {
+        "id": "rl-groq-minute",
+        "request_max_limit": 30,
+        "request_reset_duration": "1m",
+        "token_max_limit": 8000,
+        "token_reset_duration": "1m"
+      },
+      {
+        "id": "rl-groq-day",
+        "request_max_limit": 1000,
+        "request_reset_duration": "1d",
+        "token_max_limit": 200000,
+        "token_reset_duration": "1d",
+        "calendar_aligned": true
+      }
+    ],
+    "providers": [
+      {
+        "name": "nvidia",
+        "rate_limit_id": "rl-nvidia"
+      },
+      {
+        "name": "openrouter",
+        "rate_limit_id": "rl-openrouter-rpm"
+      },
+      {
+        "name": "openrouter-paid",
+        "rate_limit_id": "rl-openrouter-paid-rpm"
+      },
+      {
+        "name": "groq",
+        "rate_limit_id": "rl-groq-minute"
+      }
+    ],
+    "virtual_keys": [
+      {
+        "id": "vk-bifrost",
+        "name": "bifrost",
+        "value": "env.BIFROST_API_KEY",
+        "provider_configs": [
+          {
+            "provider": "nvidia",
+            "allowed_models": [
+              "*"
+            ],
+            "key_ids": [
+              "*"
+            ]
+          },
+          {
+            "provider": "openrouter",
+            "allowed_models": [
+              "*"
+            ],
+            "key_ids": [
+              "*"
+            ],
+            "rate_limit_id": "rl-openrouter-day"
+          },
+          {
+            "provider": "openrouter-paid",
+            "allowed_models": [
+              "*"
+            ],
+            "key_ids": [
+              "*"
+            ]
+          },
+          {
+            "provider": "groq",
+            "allowed_models": [
+              "*"
+            ],
+            "key_ids": [
+              "*"
+            ],
+            "rate_limit_id": "rl-groq-day"
+          }
+        ]
+      }
+    ]
+  }
+}

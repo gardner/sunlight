@@ -12,6 +12,7 @@ wheels/
 # Local secrets
 .env
 apps/*/.dev.vars
+bifrost/.env
 
 # Cloudflare local development state
 .wrangler/
@@ -29,6 +30,8 @@ apps/*/dev.log
 
 # Generated FYI/vector artifacts
 storage/
+bifrost/data/*
+!bifrost/data/.gitkeep
 fyi
 fyi_vectors.ndjson
 current_templates.json
