@@ -458,6 +458,13 @@ Completed:
   36.54 seconds median. NVIDIA is therefore not safe to mix into the production
   Tenancy enrichment run at 15+ scheduled RPM without a lower rate and/or
   explicit in-flight cap.
+* Skipped NVIDIA for the production Tenancy enrichment path and restarted the
+  resumable direct MiniMax run in tmux session `tenancy-llm-minimax-direct`.
+  The command uses `https://api.minimax.io/v1`, model `MiniMax-M2.7-highspeed`,
+  `--llm-rpm 15`, and logs to
+  `logs/tenancy-llm-minimax-direct-rpm15-20260525-232159.log`. The run found
+  43,759 pending files and the first monitored minute reached
+  `rpm_window=15/15` with 19 enrichments and 0 failures.
 
 ## Verification
 
@@ -677,10 +684,11 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Start the full Tenancy MiniMax enrichment run at the committed 12 RPM default
-   and monitor `rpm_window`, retry rate, structured-output failures, and
-   documents/minute. At 43,831 pending one-document requests, the no-retry floor
-   is about 61 hours at 12 RPM, and about 49 hours at the 15 RPM hard average.
+1. Monitor the active direct MiniMax run in tmux session
+   `tenancy-llm-minimax-direct`, especially `rpm_window`, retry rate,
+   structured-output failures, and documents/minute. At 43,759 pending
+   one-document requests, the no-retry floor is about 48.6 hours at the active
+   15 RPM rate.
 2. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
    at 15+ scheduled RPM. If it is still worth using, first test a lower
    scheduled rate with an explicit in-flight cap, then implement provider-level
