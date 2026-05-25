@@ -367,6 +367,29 @@ Completed:
   compact progress grid fit much higher on a standard laptop viewport.
 * Replaced the hard-coded search example chips with a random three-question
   rotation drawn from the reviewed FYI eval questions on each page load.
+* Completed legacy Tenancy Docling conversion for all 11,476 legacy PDFs:
+  `storage/justice/tenancy/markdown_docling` now contains 11,476
+  `doc_justice_tenancy_legacy_*.md` files, and the resumed conversion reported
+  10,321 converted, 33,533 skipped, and 0 failed for the combined current plus
+  legacy corpus.
+* Fixed Tenancy LLM batch preparation after the full run exposed a silent
+  O(n²)-style tokenization delay before the first LLM request. The batch builder
+  now tokenizes documents incrementally, loads the Qwen tokenizer local-first,
+  prints batch-build progress every 1,000 files, and still records exact final
+  prompt-token counts with a split safeguard for over-budget batches.
+* Verified the local-network Qwen/vLLM endpoint at `192.168.88.96:8000` is
+  currently unreachable from this machine; the full enrichment run was stopped
+  after six connection-error batches and before any successful LLM progress was
+  logged.
+* Checked the local `localhost:8080` OpenAI-compatible gateway. The NVIDIA
+  chat-completions routes are reachable but did not produce usable enrichment
+  JSON with `json_object` mode for real Tenancy decisions. Added
+  `--llm-api-mode responses` so the ingestion path can use Responses API
+  structured parsing; a real one-document smoke with `nvidia/regular-nvidia`
+  enriched successfully. However, a 4-document Responses batch took about 158
+  seconds, making full-corpus enrichment multi-day at current throughput.
+  `groq/regular-groq` followed the schema quickly, but its 8k TPM limit makes
+  it unsuitable for useful full-corpus batching.
 
 ## Verification
 
@@ -575,14 +598,13 @@ Important naming boundary:
 1. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-2. Resume the legacy Tenancy Docling conversion and embedding run for the
-   remaining 11,474 PDFs, budgeting roughly 6-8 hours with `--skip-llm`, then
-   verify idempotency and updated LanceDB row counts.
-3. Benchmark controlled Tenancy LLM enrichment at `--llm-concurrency 4`, compare
-   throughput and error rate against the clean concurrency-2 result, inspect
-   generated summaries, catchwords, questions, and legal principles, then
-   decide whether to scale the resumable enrichment pass across all tenancy
-   decisions.
+2. Resume Tenancy embedding for the converted legacy markdown with
+   `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
+   updated LanceDB row counts.
+3. Decide the production LLM enrichment route before running full-corpus
+   Tenancy enrichment: either bring the Qwen/vLLM host at `192.168.88.96:8000`
+   back online, accept multi-day `nvidia/regular-nvidia` Responses API
+   throughput, or provision a faster structured-output local model.
 4. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.

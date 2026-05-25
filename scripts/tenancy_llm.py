@@ -21,6 +21,8 @@ from tenancy_corpus import (
 LLM_ENRICHMENT_VERSION = "tenancy-llm-v1"
 LLM_PROMPT_TOKEN_MARGIN = 1024
 LLM_BATCH_BUILD_PROGRESS_INTERVAL = 1000
+LLM_API_MODE_CHAT = "chat"
+LLM_API_MODE_RESPONSES = "responses"
 ENRICHMENT_SYSTEM_PROMPT = (
     "You enrich New Zealand Tenancy Tribunal decisions for retrieval. "
     "Return only valid JSON matching the requested schema. "
@@ -342,6 +344,7 @@ def enrich_with_llm(
     max_chars: int,
     timeout: int,
     max_tokens: int,
+    api_mode: str = LLM_API_MODE_CHAT,
 ) -> dict[str, int]:
     from openai import OpenAI
 
@@ -372,6 +375,7 @@ def enrich_with_llm(
         batches=batches,
         model=model,
         max_tokens=max_tokens,
+        api_mode=api_mode,
         rpm=rpm,
         concurrency=concurrency,
         total_files=len(markdown_paths),
@@ -384,6 +388,7 @@ def enrich_batches_with_llm(
     batches: list[LlmBatch],
     model: str,
     max_tokens: int,
+    api_mode: str,
     rpm: int,
     concurrency: int,
     total_files: int,
@@ -408,6 +413,7 @@ def enrich_batches_with_llm(
                 batch,
                 model,
                 max_tokens,
+                api_mode,
                 rate_limiter,
             )
             pending[future] = (next_batch_index, batch)
@@ -447,11 +453,12 @@ def request_batch_with_rate_limit(
     batch: LlmBatch,
     model: str,
     max_tokens: int,
+    api_mode: str,
     rate_limiter: RequestRateLimiter,
 ) -> GeneratedEnrichmentBatch:
     rate_limiter.wait()
     return request_generated_enrichment_for_documents_with_retries(
-        client, batch.documents, model, max_tokens
+        client, batch.documents, model, max_tokens, api_mode=api_mode
     )
 
 
@@ -484,9 +491,12 @@ def request_generated_enrichment(
     model: str,
     max_chars: int,
     max_tokens: int,
+    api_mode: str = LLM_API_MODE_CHAT,
 ) -> GeneratedEnrichmentBatch:
     documents = build_llm_input(markdown_paths, max_chars)
-    return request_generated_enrichment_for_documents(client, documents, model, max_tokens)
+    return request_generated_enrichment_for_documents(
+        client, documents, model, max_tokens, api_mode=api_mode
+    )
 
 
 def request_generated_enrichment_for_documents(
@@ -494,7 +504,17 @@ def request_generated_enrichment_for_documents(
     documents: list[dict[str, object]],
     model: str,
     max_tokens: int,
+    api_mode: str = LLM_API_MODE_CHAT,
 ) -> GeneratedEnrichmentBatch:
+    if api_mode == LLM_API_MODE_RESPONSES:
+        response = client.responses.parse(
+            model=model,
+            input=build_enrichment_messages(documents),
+            text_format=GeneratedEnrichmentBatch,
+            temperature=0,
+        )
+        return response.output_parsed
+
     response = client.chat.completions.create(
         model=model,
         messages=build_enrichment_messages(documents),
@@ -561,13 +581,14 @@ def request_generated_enrichment_with_retries(
     max_chars: int,
     max_tokens: int,
     *,
+    api_mode: str = LLM_API_MODE_CHAT,
     attempts: int = 3,
 ) -> GeneratedEnrichmentBatch:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             return request_generated_enrichment(
-                client, markdown_paths, model, max_chars, max_tokens
+                client, markdown_paths, model, max_chars, max_tokens, api_mode=api_mode
             )
         except Exception as exc:
             last_error = exc
@@ -584,13 +605,14 @@ def request_generated_enrichment_for_documents_with_retries(
     model: str,
     max_tokens: int,
     *,
+    api_mode: str = LLM_API_MODE_CHAT,
     attempts: int = 3,
 ) -> GeneratedEnrichmentBatch:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             return request_generated_enrichment_for_documents(
-                client, documents, model, max_tokens
+                client, documents, model, max_tokens, api_mode=api_mode
             )
         except Exception as exc:
             last_error = exc

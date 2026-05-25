@@ -366,6 +366,39 @@ class IngestTenancyTests(unittest.TestCase):
         )
         self.assertEqual(calls["response_format"], {"type": "json_object"})
 
+    def test_request_generated_enrichment_can_use_responses_parse(self):
+        module = load_module()
+        calls = {}
+
+        class FakeResponses:
+            def parse(self, **kwargs):
+                calls.update(kwargs)
+                return SimpleNamespace(
+                    output_parsed=module.GeneratedEnrichmentBatch(
+                        items=[
+                            module.GeneratedEnrichment(
+                                document_id="doc_justice_tenancy_1",
+                                case_summary="Parsed with Responses.",
+                            )
+                        ]
+                    )
+                )
+
+        client = SimpleNamespace(responses=FakeResponses())
+
+        result = module.request_generated_enrichment_for_documents(
+            client,
+            [{"document_id": "doc_justice_tenancy_1", "excerpt": "body"}],
+            "nvidia/regular-nvidia",
+            max_tokens=4096,
+            api_mode="responses",
+        )
+
+        self.assertEqual(calls["model"], "nvidia/regular-nvidia")
+        self.assertEqual(calls["text_format"], module.GeneratedEnrichmentBatch)
+        self.assertEqual(calls["temperature"], 0)
+        self.assertEqual(result.items[0].case_summary, "Parsed with Responses.")
+
     def test_parse_enrichment_content_accepts_json_wrapped_in_text(self):
         module = load_module()
 

@@ -143,6 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm-max-chars", type=int, default=DEFAULT_LLM_MAX_CHARS)
     parser.add_argument("--llm-timeout", type=int, default=DEFAULT_LLM_TIMEOUT)
     parser.add_argument("--llm-max-tokens", type=int, default=DEFAULT_LLM_MAX_TOKENS)
+    parser.add_argument(
+        "--llm-api-mode",
+        choices=("chat", "responses"),
+        default=os.environ.get("TENANCY_LLM_API_MODE", "chat"),
+        help="Use chat completions or Responses API structured parsing for enrichment.",
+    )
     return parser
 
 
@@ -517,6 +523,7 @@ def main() -> int:
                 max_chars=args.llm_max_chars,
                 timeout=args.llm_timeout,
                 max_tokens=args.llm_max_tokens,
+                api_mode=args.llm_api_mode,
             )
             print(f"LLM enrichment complete: {counts}", flush=True)
             if counts["failed"]:
