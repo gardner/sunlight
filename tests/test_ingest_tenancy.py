@@ -76,6 +76,32 @@ class IngestTenancyTests(unittest.TestCase):
             14336,
         )
 
+    def test_rate_limiter_reports_rolling_request_starts(self):
+        module = load_module()
+        now = [1000.0]
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        limiter = module.RequestRateLimiter(
+            60,
+            clock=lambda: now[0],
+            sleep=sleep,
+        )
+
+        first = limiter.wait()
+        now[0] += 0.25
+        second = limiter.wait()
+        now[0] += 60.01
+        third = limiter.wait()
+
+        self.assertEqual(sleeps, [0.75])
+        self.assertEqual(first.starts_last_60s, 1)
+        self.assertEqual(second.starts_last_60s, 2)
+        self.assertEqual(third.starts_last_60s, 1)
+
     def test_include_legacy_flag_is_opt_in(self):
         module = load_module()
 

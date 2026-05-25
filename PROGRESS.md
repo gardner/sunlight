@@ -407,6 +407,10 @@ Completed:
   call `model=nvidia/regular`, which keeps Bifrost's normal provider-prefix
   behavior while routing through the currently usable high-context providers:
   NVIDIA `regular` and OpenRouter `regular`.
+* Added Tenancy LLM request-start logging with a rolling 60-second RPM window so
+  sustained enrichment runs can be monitored directly from the log. Each request
+  start now reports the active `rpm_window`, batch file count, document count,
+  and prompt-token estimate before the provider call begins.
 
 ## Verification
 
@@ -615,9 +619,8 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Run a controlled Tenancy LLM enrichment batch through the repo-local Bifrost
-   `nvidia/regular` model at the 60 RPM/concurrency 6 defaults, then compare
-   provider distribution, fallback rate, structured-output failures, and
+1. Monitor the direct NVIDIA Tenancy LLM enrichment run at 40 RPM/concurrency 6,
+   watching `rpm_window`, structured-output failures, retry rate, and
    documents/minute.
 2. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final

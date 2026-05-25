@@ -25,6 +25,7 @@ from tenancy_corpus import (
     parse_tenancy_markdown,
     render_tenancy_markdown,
 )
+from tenancy_rate_limit import RateLimitSnapshot, RequestRateLimiter
 from tenancy_llm import (
     LLM_ENRICHMENT_VERSION,
     GeneratedEnrichment,
@@ -48,6 +49,8 @@ __all__ = [
     "LLM_ENRICHMENT_VERSION",
     "GeneratedEnrichment",
     "GeneratedEnrichmentBatch",
+    "RateLimitSnapshot",
+    "RequestRateLimiter",
     "apply_generated_enrichment",
     "build_llm_batches",
     "build_llm_input",

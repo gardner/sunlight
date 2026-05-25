@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from tenancy_corpus import (
     parse_tenancy_markdown,
     render_tenancy_markdown,
 )
+from tenancy_rate_limit import RequestRateLimiter
 
 
 LLM_ENRICHMENT_VERSION = "tenancy-llm-v1"
@@ -66,20 +66,6 @@ class LlmBatch:
     markdown_paths: list[Path]
     documents: list[dict[str, object]]
     prompt_tokens: int
-
-
-class RequestRateLimiter:
-    def __init__(self, rpm: int):
-        self.min_interval = 60 / max(rpm, 1)
-        self.last_call_at = 0.0
-        self.lock = threading.Lock()
-
-    def wait(self) -> None:
-        with self.lock:
-            elapsed = time.time() - self.last_call_at
-            if self.last_call_at and elapsed < self.min_interval:
-                time.sleep(self.min_interval - elapsed)
-            self.last_call_at = time.time()
 
 
 def utc_now_iso() -> str:
@@ -456,7 +442,16 @@ def request_batch_with_rate_limit(
     api_mode: str,
     rate_limiter: RequestRateLimiter,
 ) -> GeneratedEnrichmentBatch:
-    rate_limiter.wait()
+    snapshot = rate_limiter.wait()
+    print(
+        "LLM request start: "
+        f"started_at={utc_now_iso()} "
+        f"rpm_window={snapshot.starts_last_60s}/{snapshot.rpm_limit} "
+        f"files={len(batch.markdown_paths)} "
+        f"documents={len(batch.documents)} "
+        f"prompt_tokens={batch.prompt_tokens}",
+        flush=True,
+    )
     return request_generated_enrichment_for_documents_with_retries(
         client, batch.documents, model, max_tokens, api_mode=api_mode
     )
