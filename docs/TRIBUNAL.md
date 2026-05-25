@@ -147,12 +147,11 @@ separate controlled batch before adding generated retrieval views to public
 search.
 
 The current enrichment target is the repo-local Bifrost gateway at
-`http://127.0.0.1:8081/v1`. API calls use the single model alias
-`nvidia/tenancy-regular`, which Bifrost routes across the currently usable
-high-context providers: NVIDIA `regular` and OpenRouter `regular-openrouter`,
-with provider-specific fallbacks. Groq remains available as `groq/regular`, but
-it is not in the default Tenancy aggregate route because its lower token limits
-caused fast 413/TPM failures for batched decision prompts.
+`http://127.0.0.1:8081/v1`. API calls use `nvidia/regular`, which starts from
+the high-context route and lets Bifrost fan out across the currently usable
+providers: NVIDIA `regular` and OpenRouter `regular`, with provider-specific
+fallbacks. Groq is not in the default Tenancy `regular` route because its lower
+token limits caused fast 413/TPM failures for batched decision prompts.
 
 Token budgeting still uses the local Qwen tokenizer `Qwen/Qwen3.6-27B` as a
 consistent estimator. The practical per-request prompt budget remains 14,336

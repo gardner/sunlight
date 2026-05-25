@@ -33,6 +33,18 @@ Check models:
 curl -s http://127.0.0.1:${BIFROST_HTTP_PORT:-8081}/v1/models
 ```
 
+Each provider is configured with only these model aliases:
+
+```text
+fast
+regular
+reasoning
+```
+
+Bifrost may still return provider-prefixed IDs such as `nvidia/regular` or
+`openrouter/regular` from `/v1/models`; the important contract is that the model
+name after the provider is one of the three aliases above.
+
 To replace the old `8080` gateway, stop the existing container first or set
 `BIFROST_HTTP_PORT=8080` and `BIFROST_BASE_URL=http://localhost:8080/v1` in
 `bifrost/.env`.
@@ -43,16 +55,13 @@ Debug logging is enabled with `LOG_LEVEL=debug` and `LOG_STYLE=json`.
 
 The copied routing rules are intentionally explicit:
 
-- Tenancy enrichment should call `model: "nvidia/tenancy-regular"`. The
-  `tenancy-regular` route currently splits that single model name across NVIDIA
-  `regular` and OpenRouter `regular-openrouter`, with matching fallbacks.
+- Tenancy enrichment should call `model: "nvidia/regular"` so Bifrost starts
+  from the high-context route and can fan out to the configured provider
+  targets.
 - CEL uses `provider` and `model`, not `request.model`.
 - Every routing rule has `scope: "global"`.
-- OpenRouter targets use OpenRouter aliases such as `regular-openrouter`
-  instead of carrying the incoming NVIDIA model alias.
-- Fallbacks use `provider/model` values, such as
-  `openrouter/regular-openrouter`, because bare provider names are ignored by
-  Bifrost fallback parsing.
+- Fallbacks use `provider/model` values, such as `openrouter/regular`, because
+  bare provider names are ignored by Bifrost fallback parsing.
 
 If you change `config.json`, reset the ignored local runtime DB before
 restarting so Bifrost imports the file again:

@@ -385,10 +385,10 @@ Completed:
   chat-completions routes are reachable but did not produce usable enrichment
   JSON with `json_object` mode for real Tenancy decisions. Added
   `--llm-api-mode responses` so the ingestion path can use Responses API
-  structured parsing; a real one-document smoke with `nvidia/regular-nvidia`
+  structured parsing; a real one-document smoke with the regular NVIDIA route
   enriched successfully. However, a 4-document Responses batch took about 158
   seconds, making full-corpus enrichment multi-day at current throughput.
-  `groq/regular-groq` followed the schema quickly, but its 8k TPM limit makes
+  A direct Groq regular route followed the schema quickly, but its 8k TPM limit makes
   it unsuitable for useful full-corpus batching.
 * Copied the load-balanced Bifrost gateway setup from
   `/home/dev/src/bifrost/config.json` into `bifrost/` with a repo-local Docker
@@ -400,13 +400,13 @@ Completed:
   `provider/model` form. Verified the debug gateway boots on `localhost:8081`
   and that `nvidia/regular` now logs matched routing decisions for both NVIDIA
   and OpenRouter weighted targets.
-* Added a single Tenancy enrichment model alias, `nvidia/tenancy-regular`, to the
-  repo-local Bifrost config. It routes across NVIDIA `regular` and OpenRouter
-  `regular-openrouter` with explicit fallbacks, while leaving Groq available as
-  a direct `groq/regular` route for smaller prompts. Updated the Tenancy
-  ingestion defaults to call local Bifrost with `model=nvidia/tenancy-regular`,
-  Responses API structured parsing, 60 RPM, and concurrency 6; a live Python
-  smoke returned parsed enrichment metadata through the aggregate alias.
+* Cleaned the repo-local Bifrost model aliases to exactly `fast`, `regular`,
+  and `reasoning` for each provider. Removed the task-specific Tenancy alias,
+  provider-suffixed aliases, raw model IDs, and wildcard virtual-key model
+  permissions from the committed config. Updated Tenancy ingestion defaults to
+  call `model=nvidia/regular`, which keeps Bifrost's normal provider-prefix
+  behavior while routing through the currently usable high-context providers:
+  NVIDIA `regular` and OpenRouter `regular`.
 
 ## Verification
 
@@ -616,7 +616,7 @@ Important naming boundary:
 ## Next Steps
 
 1. Run a controlled Tenancy LLM enrichment batch through the repo-local Bifrost
-   `nvidia/tenancy-regular` alias at the new 60 RPM/concurrency 6 defaults, then compare
+   `nvidia/regular` model at the 60 RPM/concurrency 6 defaults, then compare
    provider distribution, fallback rate, structured-output failures, and
    documents/minute.
 2. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
@@ -625,9 +625,9 @@ Important naming boundary:
 3. Resume Tenancy embedding for the converted legacy markdown with
    `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
    updated LanceDB row counts.
-4. If the Bifrost `nvidia/tenancy-regular` smoke batch is stable, run full-corpus Tenancy LLM
-   enrichment idempotently; otherwise adjust the route weights or fallbacks
-   before scaling the run.
+4. If the Bifrost `nvidia/regular` smoke batch is stable, run full-corpus
+   Tenancy LLM enrichment idempotently; otherwise adjust the route weights or
+   fallbacks before scaling the run.
 5. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.

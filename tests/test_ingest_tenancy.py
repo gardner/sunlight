@@ -35,7 +35,7 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(args.convert_gpu, "0")
         self.assertEqual(args.embed_gpu, "0")
         self.assertEqual(args.llm_base_url, "http://127.0.0.1:8081/v1")
-        self.assertEqual(args.llm_model, "nvidia/tenancy-regular")
+        self.assertEqual(args.llm_model, "nvidia/regular")
         self.assertEqual(args.llm_tokenizer_model, "Qwen/Qwen3.6-27B")
         self.assertEqual(args.llm_context_tokens, 131072)
         self.assertEqual(args.llm_prompt_token_budget, 14336)
@@ -390,12 +390,12 @@ class IngestTenancyTests(unittest.TestCase):
         result = module.request_generated_enrichment_for_documents(
             client,
             [{"document_id": "doc_justice_tenancy_1", "excerpt": "body"}],
-            "nvidia/regular-nvidia",
+            "nvidia/regular",
             max_tokens=4096,
             api_mode="responses",
         )
 
-        self.assertEqual(calls["model"], "nvidia/regular-nvidia")
+        self.assertEqual(calls["model"], "nvidia/regular")
         self.assertEqual(calls["text_format"], module.GeneratedEnrichmentBatch)
         self.assertEqual(calls["temperature"], 0)
         self.assertEqual(result.items[0].case_summary, "Parsed with Responses.")
