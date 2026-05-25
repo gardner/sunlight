@@ -146,21 +146,22 @@ idempotent and resumable through `llm_enrichment_version`; it should be run as a
 separate controlled batch before adding generated retrieval views to public
 search.
 
-The current enrichment target is the local-network vLLM host at
-`http://192.168.88.96:8000/v1`, serving `Qwen/Qwen3.6-27B-FP8` across two RTX
-5090 32 GB cards with tensor parallel 2, `--max-model-len 131072`,
-`--kv-cache-dtype fp8`, `--gpu-memory-utilization 0.90`,
-`--max-num-batched-tokens 16384`, `--max-num-seqs 5`, and prefix caching
-enabled. API calls use the served model ID `Qwen/Qwen3.6-27B-FP8`; token
-budgeting uses the matching base tokenizer `Qwen/Qwen3.6-27B`.
+The current enrichment target is the repo-local Bifrost gateway at
+`http://127.0.0.1:8081/v1`. API calls use the single model alias
+`nvidia/tenancy-regular`, which Bifrost routes across the currently usable
+high-context providers: NVIDIA `regular` and OpenRouter `regular-openrouter`,
+with provider-specific fallbacks. Groq remains available as `groq/regular`, but
+it is not in the default Tenancy aggregate route because its lower token limits
+caused fast 413/TPM failures for batched decision prompts.
 
-Although the model context is 131,072 tokens, the practical per-request prompt
-budget is set to 14,336 tokens to stay near the vLLM scheduler's 16,384 batched
-token target while leaving room for output. A 1,000-file Qwen-tokenized sample
-of the existing Tenancy markdown produced 137 enrichment requests at this
-budget: mean 7.3 decisions per request, median 7, and maximum 8. The default
-LLM concurrency is 2; use `--llm-concurrency 4` as the first throughput
-benchmark override.
+Token budgeting still uses the local Qwen tokenizer `Qwen/Qwen3.6-27B` as a
+consistent estimator. The practical per-request prompt budget remains 14,336
+tokens, leaving room for output while avoiding unnecessarily large fallback
+requests. A 1,000-file Qwen-tokenized sample of the existing Tenancy markdown
+produced 137 enrichment requests at this budget: mean 7.3 decisions per request,
+median 7, and maximum 8. The default LLM request rate is now 60 RPM, matching
+the configured aggregate NVIDIA plus OpenRouter route capacity, and default
+LLM concurrency is 6.
 
 A sustained concurrency-2 test on 1,000 temporary Tenancy markdown copies
 completed cleanly:
@@ -175,9 +176,10 @@ completed cleanly:
 ```
 
 One copied markdown file already had the current enrichment marker before the
-test run, so it was skipped. The next tuning test should run the same temporary
-copy workflow with `--llm-concurrency 4` and compare throughput, error rate,
-and generated metadata quality.
+test run, so it was skipped. The next tuning test should use the current
+Bifrost defaults first, then compare provider distribution, fallback rate,
+structured-output failures, throughput, and generated metadata quality before
+raising RPM or concurrency further.
 
 ## Converter Decision
 

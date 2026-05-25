@@ -11,6 +11,7 @@
             "fast",
             "fast-nvidia",
             "regular",
+            "tenancy-regular",
             "regular-nvidia",
             "reasoning",
             "reasoning-nvidia",
@@ -23,6 +24,7 @@
             "fast": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
             "fast-nvidia": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
             "regular": "nvidia/nemotron-3-super-120b-a12b",
+            "tenancy-regular": "nvidia/nemotron-3-super-120b-a12b",
             "regular-nvidia": "nvidia/nemotron-3-super-120b-a12b",
             "reasoning": "deepseek-ai/deepseek-v4-pro",
             "reasoning-nvidia": "deepseek-ai/deepseek-v4-pro"
@@ -175,6 +177,30 @@
       }
     ],
     "routing_rules": [
+      {
+        "id": "tenancy-regular",
+        "name": "tenancy regular aggregate",
+        "enabled": true,
+        "cel_expression": "provider == 'nvidia' && model == 'tenancy-regular'",
+        "scope": "global",
+        "priority": 0,
+        "targets": [
+          {
+            "provider": "nvidia",
+            "model": "regular",
+            "weight": 0.67
+          },
+          {
+            "provider": "openrouter",
+            "model": "regular-openrouter",
+            "weight": 0.33
+          }
+        ],
+        "fallbacks": [
+          "nvidia/regular",
+          "openrouter/regular-openrouter"
+        ]
+      },
       {
         "id": "fast-lb",
         "name": "fast",

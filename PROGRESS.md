@@ -400,6 +400,13 @@ Completed:
   `provider/model` form. Verified the debug gateway boots on `localhost:8081`
   and that `nvidia/regular` now logs matched routing decisions for both NVIDIA
   and OpenRouter weighted targets.
+* Added a single Tenancy enrichment model alias, `nvidia/tenancy-regular`, to the
+  repo-local Bifrost config. It routes across NVIDIA `regular` and OpenRouter
+  `regular-openrouter` with explicit fallbacks, while leaving Groq available as
+  a direct `groq/regular` route for smaller prompts. Updated the Tenancy
+  ingestion defaults to call local Bifrost with `model=nvidia/tenancy-regular`,
+  Responses API structured parsing, 60 RPM, and concurrency 6; a live Python
+  smoke returned parsed enrichment metadata through the aggregate alias.
 
 ## Verification
 
@@ -564,6 +571,7 @@ pnpm dlx playwright screenshot --viewport-size=390,844 http://127.0.0.1:8787/sea
 pnpm test:ts apps/landing/lib/search-examples.test.ts apps/landing/lib/search.test.ts
 docker compose -f bifrost/docker-compose.yml --env-file bifrost/.env config --quiet
 curl -s http://127.0.0.1:8081/v1/models
+uv run python -m unittest tests.test_bifrost_config tests.test_ingest_tenancy
 ```
 
 ## Notes
@@ -607,20 +615,19 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Replay representative slow Tenancy enrichment requests through the repo-local
-   debug Bifrost gateway on `localhost:8081`, then inspect provider, status,
-   duration, and fallback logs before changing route priorities or disabling a
-   failing provider.
+1. Run a controlled Tenancy LLM enrichment batch through the repo-local Bifrost
+   `nvidia/tenancy-regular` alias at the new 60 RPM/concurrency 6 defaults, then compare
+   provider distribution, fallback rate, structured-output failures, and
+   documents/minute.
 2. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
 3. Resume Tenancy embedding for the converted legacy markdown with
    `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
    updated LanceDB row counts.
-4. Decide the production LLM enrichment route before running full-corpus
-   Tenancy enrichment: either bring the Qwen/vLLM host at `192.168.88.96:8000`
-   back online, accept multi-day `nvidia/regular-nvidia` Responses API
-   throughput, or provision a faster structured-output local model.
+4. If the Bifrost `nvidia/tenancy-regular` smoke batch is stable, run full-corpus Tenancy LLM
+   enrichment idempotently; otherwise adjust the route weights or fallbacks
+   before scaling the run.
 5. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.

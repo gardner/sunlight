@@ -43,6 +43,9 @@ Debug logging is enabled with `LOG_LEVEL=debug` and `LOG_STYLE=json`.
 
 The copied routing rules are intentionally explicit:
 
+- Tenancy enrichment should call `model: "nvidia/tenancy-regular"`. The
+  `tenancy-regular` route currently splits that single model name across NVIDIA
+  `regular` and OpenRouter `regular-openrouter`, with matching fallbacks.
 - CEL uses `provider` and `model`, not `request.model`.
 - Every routing rule has `scope: "global"`.
 - OpenRouter targets use OpenRouter aliases such as `regular-openrouter`

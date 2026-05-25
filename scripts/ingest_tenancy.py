@@ -75,15 +75,15 @@ DEFAULT_EMBED_BATCH_SIZE = 128
 DEFAULT_CHUNK_SIZE = 8192
 DEFAULT_CHUNK_OVERLAP = 128
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 8
-DEFAULT_LLM_BASE_URL = "http://192.168.88.96:8000/v1"
+DEFAULT_LLM_BASE_URL = "http://127.0.0.1:8081/v1"
 DEFAULT_LLM_API_KEY = "sk-bf-bifrost"
-DEFAULT_LLM_MODEL = "Qwen/Qwen3.6-27B-FP8"
+DEFAULT_LLM_MODEL = "nvidia/tenancy-regular"
 DEFAULT_LLM_TOKENIZER_MODEL = "Qwen/Qwen3.6-27B"
 DEFAULT_LLM_CONTEXT_TOKENS = 131072
 DEFAULT_LLM_PROMPT_TOKEN_BUDGET = 14336
-DEFAULT_LLM_RPM = 240
+DEFAULT_LLM_RPM = 60
 DEFAULT_LLM_BATCH_SIZE = 64
-DEFAULT_LLM_CONCURRENCY = 2
+DEFAULT_LLM_CONCURRENCY = 6
 DEFAULT_LLM_MAX_CHARS = 5000
 DEFAULT_LLM_TIMEOUT = 120
 DEFAULT_LLM_MAX_TOKENS = 4096
@@ -146,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--llm-api-mode",
         choices=("chat", "responses"),
-        default=os.environ.get("TENANCY_LLM_API_MODE", "chat"),
+        default=os.environ.get("TENANCY_LLM_API_MODE", "responses"),
         help="Use chat completions or Responses API structured parsing for enrichment.",
     )
     return parser
