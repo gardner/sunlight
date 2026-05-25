@@ -427,6 +427,12 @@ Completed:
   40 RPM/concurrency 20, then at 20 RPM/concurrency 4, and finally in a
   5-document canary at 5 RPM/concurrency 1. No successful enrichment progress
   was logged, and no partial enrichment markers were written.
+* Inspected the direct NVIDIA 429 response for `deepseek-ai/deepseek-v4-pro`.
+  The HTTP body contains only `{"status":429,"title":"Too Many Requests"}` and
+  no explanatory `message`, `detail`, `Retry-After`, or rate-limit headers were
+  present. Tiny same-key requests to NVIDIA Nemotron models succeeded, so the
+  current blocker appears specific to DeepSeek model availability or
+  model-specific throttling rather than a key-wide NVIDIA outage.
 
 ## Verification
 
@@ -646,16 +652,14 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Resolve direct NVIDIA 429s before launching full-corpus Tenancy LLM
-   enrichment again. The next useful check is whether the NVIDIA key/model quota
-   has reset, whether another process is consuming the same quota, or whether
-   `deepseek-ai/deepseek-v4-pro` has a stricter per-key limit than expected.
-2. Once a 5-document canary succeeds, restart full enrichment conservatively,
+1. Decide whether to wait for `deepseek-ai/deepseek-v4-pro` availability to
+   recover or switch Tenancy enrichment to an available NVIDIA Nemotron model.
+2. Before launching full enrichment again, run a 5-document Instructor canary
+   against the chosen model and require successful `LLM enrichment progress`
+   lines.
+3. Once a 5-document canary succeeds, restart full enrichment conservatively,
    starting around 5-10 RPM/concurrency 1-2 and increasing only after progress
    lines show successful enrichment.
-3. If NVIDIA remains unavailable, decide whether to temporarily route
-   enrichment through Bifrost/OpenRouter or the local-network vLLM host instead
-   of direct NVIDIA.
 4. If `json_schema` proves unstable with `deepseek-ai/deepseek-v4-pro`, retry
    with `json_mode` before falling back to `md_json`, since `md_json` has the
    broadest compatibility but the weakest speed and accuracy profile.
