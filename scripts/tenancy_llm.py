@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import random
 import time
+from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,6 +17,11 @@ from tenancy_corpus import (
     parse_tenancy_markdown,
     render_tenancy_markdown,
 )
+from tenancy_instructor import (
+    DEFAULT_INSTRUCTOR_MODE,
+    instructor_client,
+)
+from tenancy_llm_messages import build_enrichment_messages
 from tenancy_rate_limit import RequestRateLimiter
 
 
@@ -22,24 +29,8 @@ LLM_ENRICHMENT_VERSION = "tenancy-llm-v1"
 LLM_PROMPT_TOKEN_MARGIN = 1024
 LLM_BATCH_BUILD_PROGRESS_INTERVAL = 1000
 LLM_API_MODE_CHAT = "chat"
+LLM_API_MODE_INSTRUCTOR = "instructor"
 LLM_API_MODE_RESPONSES = "responses"
-ENRICHMENT_SYSTEM_PROMPT = (
-    "You enrich New Zealand Tenancy Tribunal decisions for retrieval. "
-    "Return only valid JSON matching the requested schema. "
-    "Return neutral, concise metadata. Do not invent facts. "
-    "Use empty lists or an empty string when the excerpt does not support a field."
-)
-ENRICHMENT_INSTRUCTIONS = {
-    "items": "Return exactly one item for every input document, with no omissions.",
-    "document_id": "Every item must repeat the exact document_id from its input document.",
-    "case_summary": "One neutral sentence under 45 words.",
-    "catchwords": "Three to eight short legal/retrieval catchwords.",
-    "questions_answered": "Three to six natural-language questions this decision answers.",
-    "legal_principles": (
-        "Zero to four reusable principles. confidence must be low, medium, or high; "
-        "source_section should be order, reasons, or boilerplate."
-    ),
-}
 
 
 class LegalPrinciple(BaseModel):
@@ -331,10 +322,14 @@ def enrich_with_llm(
     timeout: int,
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
+    instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
+    start_jitter_seconds: tuple[float, float] = (0, 0),
 ) -> dict[str, int]:
     from openai import OpenAI
 
     client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+    if api_mode == LLM_API_MODE_INSTRUCTOR:
+        client = instructor_client(client, instructor_mode)
     print(f"Loading LLM tokenizer: {tokenizer_model}", flush=True)
     tokenizer = load_qwen_tokenizer(tokenizer_model)
     print(f"Loaded LLM tokenizer: {tokenizer_model}", flush=True)
@@ -362,6 +357,8 @@ def enrich_with_llm(
         model=model,
         max_tokens=max_tokens,
         api_mode=api_mode,
+        instructor_mode=instructor_mode,
+        start_jitter_seconds=start_jitter_seconds,
         rpm=rpm,
         concurrency=concurrency,
         total_files=len(markdown_paths),
@@ -375,6 +372,8 @@ def enrich_batches_with_llm(
     model: str,
     max_tokens: int,
     api_mode: str,
+    instructor_mode: str,
+    start_jitter_seconds: tuple[float, float],
     rpm: int,
     concurrency: int,
     total_files: int,
@@ -401,6 +400,8 @@ def enrich_batches_with_llm(
                 max_tokens,
                 api_mode,
                 rate_limiter,
+                instructor_mode,
+                start_jitter_seconds,
             )
             pending[future] = (next_batch_index, batch)
             next_batch_index += 1
@@ -441,7 +442,15 @@ def request_batch_with_rate_limit(
     max_tokens: int,
     api_mode: str,
     rate_limiter: RequestRateLimiter,
+    instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
+    start_jitter_seconds: tuple[float, float] = (0, 0),
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    random_uniform: Callable[[float, float], float] = random.uniform,
 ) -> GeneratedEnrichmentBatch:
+    jitter_min, jitter_max = start_jitter_seconds
+    if jitter_max > 0:
+        sleep(max(0, random_uniform(jitter_min, jitter_max)))
     snapshot = rate_limiter.wait()
     print(
         "LLM request start: "
@@ -453,7 +462,12 @@ def request_batch_with_rate_limit(
         flush=True,
     )
     return request_generated_enrichment_for_documents_with_retries(
-        client, batch.documents, model, max_tokens, api_mode=api_mode
+        client,
+        batch.documents,
+        model,
+        max_tokens,
+        api_mode=api_mode,
+        instructor_mode=instructor_mode,
     )
 
 
@@ -487,10 +501,16 @@ def request_generated_enrichment(
     max_chars: int,
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
+    instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
 ) -> GeneratedEnrichmentBatch:
     documents = build_llm_input(markdown_paths, max_chars)
     return request_generated_enrichment_for_documents(
-        client, documents, model, max_tokens, api_mode=api_mode
+        client,
+        documents,
+        model,
+        max_tokens,
+        api_mode=api_mode,
+        instructor_mode=instructor_mode,
     )
 
 
@@ -500,6 +520,7 @@ def request_generated_enrichment_for_documents(
     model: str,
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
+    instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
 ) -> GeneratedEnrichmentBatch:
     if api_mode == LLM_API_MODE_RESPONSES:
         response = client.responses.parse(
@@ -509,6 +530,16 @@ def request_generated_enrichment_for_documents(
             temperature=0,
         )
         return response.output_parsed
+
+    if api_mode == LLM_API_MODE_INSTRUCTOR:
+        return client.chat.completions.create(
+            model=model,
+            response_model=GeneratedEnrichmentBatch,
+            messages=build_enrichment_messages(documents),
+            temperature=0,
+            max_tokens=max_tokens,
+            max_retries=3,
+        )
 
     response = client.chat.completions.create(
         model=model,
@@ -521,25 +552,6 @@ def request_generated_enrichment_for_documents(
     content = response.choices[0].message.content or ""
     default_document_id = str(documents[0]["document_id"]) if len(documents) == 1 else None
     return parse_enrichment_content(content, default_document_id=default_document_id)
-
-
-def build_enrichment_messages(documents: list[dict[str, object]]) -> list[dict[str, str]]:
-    return [
-        {
-            "role": "system",
-            "content": ENRICHMENT_SYSTEM_PROMPT,
-        },
-        {
-            "role": "user",
-            "content": json.dumps(
-                {
-                    "instructions": ENRICHMENT_INSTRUCTIONS,
-                    "documents": documents,
-                },
-                ensure_ascii=True,
-            ),
-        },
-    ]
 
 
 def parse_enrichment_content(
@@ -577,13 +589,20 @@ def request_generated_enrichment_with_retries(
     max_tokens: int,
     *,
     api_mode: str = LLM_API_MODE_CHAT,
+    instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
     attempts: int = 3,
 ) -> GeneratedEnrichmentBatch:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             return request_generated_enrichment(
-                client, markdown_paths, model, max_chars, max_tokens, api_mode=api_mode
+                client,
+                markdown_paths,
+                model,
+                max_chars,
+                max_tokens,
+                api_mode=api_mode,
+                instructor_mode=instructor_mode,
             )
         except Exception as exc:
             last_error = exc
@@ -601,13 +620,19 @@ def request_generated_enrichment_for_documents_with_retries(
     max_tokens: int,
     *,
     api_mode: str = LLM_API_MODE_CHAT,
+    instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
     attempts: int = 3,
 ) -> GeneratedEnrichmentBatch:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             return request_generated_enrichment_for_documents(
-                client, documents, model, max_tokens, api_mode=api_mode
+                client,
+                documents,
+                model,
+                max_tokens,
+                api_mode=api_mode,
+                instructor_mode=instructor_mode,
             )
         except Exception as exc:
             last_error = exc

@@ -25,11 +25,18 @@ from tenancy_corpus import (
     parse_tenancy_markdown,
     render_tenancy_markdown,
 )
+from tenancy_instructor import (
+    DEFAULT_INSTRUCTOR_MODE,
+    INSTRUCTOR_MODE_CHOICES,
+    resolve_instructor_mode,
+)
 from tenancy_rate_limit import RateLimitSnapshot, RequestRateLimiter
 from tenancy_llm import (
     LLM_ENRICHMENT_VERSION,
+    LLM_API_MODE_INSTRUCTOR,
     GeneratedEnrichment,
     GeneratedEnrichmentBatch,
+    LlmBatch,
     apply_generated_enrichment,
     build_llm_batches,
     build_llm_input,
@@ -39,16 +46,20 @@ from tenancy_llm import (
     llm_prompt_token_budget,
     parse_enrichment_content,
     pending_llm_markdown_paths,
+    request_batch_with_rate_limit,
     request_generated_enrichment,
     request_generated_enrichment_for_documents,
+    request_generated_enrichment_for_documents_with_retries,
     request_generated_enrichment_with_retries,
 )
 
 
 __all__ = [
     "LLM_ENRICHMENT_VERSION",
+    "LLM_API_MODE_INSTRUCTOR",
     "GeneratedEnrichment",
     "GeneratedEnrichmentBatch",
+    "LlmBatch",
     "RateLimitSnapshot",
     "RequestRateLimiter",
     "apply_generated_enrichment",
@@ -58,9 +69,12 @@ __all__ = [
     "effective_llm_prompt_token_budget",
     "llm_prompt_token_budget",
     "parse_enrichment_content",
+    "request_batch_with_rate_limit",
     "request_generated_enrichment",
     "request_generated_enrichment_for_documents",
+    "request_generated_enrichment_for_documents_with_retries",
     "request_generated_enrichment_with_retries",
+    "resolve_instructor_mode",
 ]
 
 
@@ -78,18 +92,20 @@ DEFAULT_EMBED_BATCH_SIZE = 128
 DEFAULT_CHUNK_SIZE = 8192
 DEFAULT_CHUNK_OVERLAP = 128
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 8
-DEFAULT_LLM_BASE_URL = "http://127.0.0.1:8081/v1"
-DEFAULT_LLM_API_KEY = "sk-bf-bifrost"
-DEFAULT_LLM_MODEL = "nvidia/regular"
+DEFAULT_LLM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+DEFAULT_LLM_API_KEY = ""
+DEFAULT_LLM_MODEL = "deepseek-ai/deepseek-v4-pro"
 DEFAULT_LLM_TOKENIZER_MODEL = "Qwen/Qwen3.6-27B"
 DEFAULT_LLM_CONTEXT_TOKENS = 131072
 DEFAULT_LLM_PROMPT_TOKEN_BUDGET = 14336
-DEFAULT_LLM_RPM = 60
-DEFAULT_LLM_BATCH_SIZE = 64
-DEFAULT_LLM_CONCURRENCY = 6
+DEFAULT_LLM_RPM = 40
+DEFAULT_LLM_BATCH_SIZE = 1
+DEFAULT_LLM_CONCURRENCY = 20
 DEFAULT_LLM_MAX_CHARS = 5000
 DEFAULT_LLM_TIMEOUT = 120
 DEFAULT_LLM_MAX_TOKENS = 4096
+DEFAULT_LLM_START_JITTER_MIN = 3
+DEFAULT_LLM_START_JITTER_MAX = 15
 
 EMBED_PIPELINE_VERSION = f"{PIPELINE_VERSION}-qwen3-views-v1"
 
@@ -146,11 +162,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm-max-chars", type=int, default=DEFAULT_LLM_MAX_CHARS)
     parser.add_argument("--llm-timeout", type=int, default=DEFAULT_LLM_TIMEOUT)
     parser.add_argument("--llm-max-tokens", type=int, default=DEFAULT_LLM_MAX_TOKENS)
+    parser.add_argument("--llm-start-jitter-min", type=float, default=DEFAULT_LLM_START_JITTER_MIN)
+    parser.add_argument("--llm-start-jitter-max", type=float, default=DEFAULT_LLM_START_JITTER_MAX)
     parser.add_argument(
         "--llm-api-mode",
-        choices=("chat", "responses"),
-        default=os.environ.get("TENANCY_LLM_API_MODE", "responses"),
-        help="Use chat completions or Responses API structured parsing for enrichment.",
+        choices=("chat", "responses", "instructor"),
+        default=os.environ.get("TENANCY_LLM_API_MODE", LLM_API_MODE_INSTRUCTOR),
+        help="Use chat completions, Responses API structured parsing, or Instructor for enrichment.",
+    )
+    parser.add_argument(
+        "--llm-instructor-mode",
+        choices=INSTRUCTOR_MODE_CHOICES,
+        default=os.environ.get("TENANCY_LLM_INSTRUCTOR_MODE", DEFAULT_INSTRUCTOR_MODE),
+        help="Instructor mode used when --llm-api-mode=instructor.",
     )
     return parser
 
@@ -527,6 +551,11 @@ def main() -> int:
                 timeout=args.llm_timeout,
                 max_tokens=args.llm_max_tokens,
                 api_mode=args.llm_api_mode,
+                instructor_mode=args.llm_instructor_mode,
+                start_jitter_seconds=(
+                    args.llm_start_jitter_min,
+                    args.llm_start_jitter_max,
+                ),
             )
             print(f"LLM enrichment complete: {counts}", flush=True)
             if counts["failed"]:

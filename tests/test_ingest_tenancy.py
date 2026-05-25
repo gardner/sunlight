@@ -34,17 +34,21 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(args.persist_dir, Path("storage/justice/tenancy/lancedb"))
         self.assertEqual(args.convert_gpu, "0")
         self.assertEqual(args.embed_gpu, "0")
-        self.assertEqual(args.llm_base_url, "http://127.0.0.1:8081/v1")
-        self.assertEqual(args.llm_model, "nvidia/regular")
+        self.assertEqual(args.llm_base_url, "https://integrate.api.nvidia.com/v1")
+        self.assertEqual(args.llm_api_key, "")
+        self.assertEqual(args.llm_model, "deepseek-ai/deepseek-v4-pro")
         self.assertEqual(args.llm_tokenizer_model, "Qwen/Qwen3.6-27B")
         self.assertEqual(args.llm_context_tokens, 131072)
         self.assertEqual(args.llm_prompt_token_budget, 14336)
-        self.assertEqual(args.llm_rpm, 60)
-        self.assertEqual(args.llm_batch_size, 64)
-        self.assertEqual(args.llm_concurrency, 6)
+        self.assertEqual(args.llm_rpm, 40)
+        self.assertEqual(args.llm_batch_size, 1)
+        self.assertEqual(args.llm_concurrency, 20)
         self.assertEqual(args.llm_timeout, 120)
         self.assertEqual(args.llm_max_tokens, 4096)
-        self.assertEqual(args.llm_api_mode, "responses")
+        self.assertEqual(args.llm_api_mode, "instructor")
+        self.assertEqual(args.llm_instructor_mode, "json_schema")
+        self.assertEqual(args.llm_start_jitter_min, 3)
+        self.assertEqual(args.llm_start_jitter_max, 15)
 
     def test_llm_base_url_can_be_overridden_by_environment(self):
         module = load_module()
@@ -425,6 +429,80 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(calls["text_format"], module.GeneratedEnrichmentBatch)
         self.assertEqual(calls["temperature"], 0)
         self.assertEqual(result.items[0].case_summary, "Parsed with Responses.")
+
+    def test_request_generated_enrichment_can_use_instructor(self):
+        module = load_module()
+        calls = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                calls.update(kwargs)
+                return module.GeneratedEnrichmentBatch(
+                    items=[
+                        module.GeneratedEnrichment(
+                            document_id="doc_justice_tenancy_1",
+                            case_summary="Parsed with Instructor.",
+                        )
+                    ]
+                )
+
+        client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+        result = module.request_generated_enrichment_for_documents(
+            client,
+            [{"document_id": "doc_justice_tenancy_1", "excerpt": "body"}],
+            "deepseek-ai/deepseek-v4-pro",
+            max_tokens=4096,
+            api_mode="instructor",
+        )
+
+        self.assertEqual(calls["model"], "deepseek-ai/deepseek-v4-pro")
+        self.assertEqual(calls["response_model"], module.GeneratedEnrichmentBatch)
+        self.assertEqual(calls["temperature"], 0)
+        self.assertEqual(calls["max_retries"], 3)
+        self.assertEqual(result.items[0].case_summary, "Parsed with Instructor.")
+
+    def test_instructor_mode_names_resolve_to_instructor_modes(self):
+        module = load_module()
+
+        self.assertEqual(module.resolve_instructor_mode("json_schema").name, "JSON_SCHEMA")
+        self.assertEqual(module.resolve_instructor_mode("json_mode").name, "JSON")
+        self.assertEqual(module.resolve_instructor_mode("md_json").name, "MD_JSON")
+
+    def test_request_start_jitter_sleeps_before_rate_limiter(self):
+        module = load_module()
+        events = []
+
+        class FakeRateLimiter:
+            def wait(self):
+                events.append("rate_limit")
+                return SimpleNamespace(starts_last_60s=1, rpm_limit=40)
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                return module.GeneratedEnrichmentBatch(items=[])
+
+        client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+        module.request_batch_with_rate_limit(
+            client,
+            module.LlmBatch(
+                markdown_paths=[Path("a.md")],
+                documents=[{"document_id": "doc_1"}],
+                prompt_tokens=100,
+            ),
+            "deepseek-ai/deepseek-v4-pro",
+            4096,
+            "instructor",
+            FakeRateLimiter(),
+            "json_schema",
+            (3, 15),
+            sleep=lambda seconds: events.append(("sleep", seconds)),
+            random_uniform=lambda low, high: 7,
+            )
+
+        self.assertEqual(events[0], ("sleep", 7))
+        self.assertEqual(events[1], "rate_limit")
 
     def test_parse_enrichment_content_accepts_json_wrapped_in_text(self):
         module = load_module()

@@ -411,6 +411,12 @@ Completed:
   sustained enrichment runs can be monitored directly from the log. Each request
   start now reports the active `rpm_window`, batch file count, document count,
   and prompt-token estimate before the provider call begins.
+* Added the Tenancy LLM enrichment path for direct NVIDIA NIM calls to
+  `deepseek-ai/deepseek-v4-pro` through Instructor `from_openai()`. The current
+  defaults use one decision per request, `json_schema` Instructor mode, 40 RPM,
+  concurrency 20, and 3-15 seconds of random startup jitter so parallel workers
+  do not burst the provider at launch. `json_mode` and `md_json` remain
+  available as explicit fallback modes.
 
 ## Verification
 
@@ -576,6 +582,11 @@ pnpm test:ts apps/landing/lib/search-examples.test.ts apps/landing/lib/search.te
 docker compose -f bifrost/docker-compose.yml --env-file bifrost/.env config --quiet
 curl -s http://127.0.0.1:8081/v1/models
 uv run python -m unittest tests.test_bifrost_config tests.test_ingest_tenancy
+uv run python -m unittest tests.test_ingest_tenancy
+uv run python -m unittest discover -s tests
+uv run ruff check scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py tests/test_ingest_tenancy.py
+uv run ruff check --select C901 scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py
+uv run pre-commit run --files scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py tests/test_ingest_tenancy.py PROGRESS.md pyproject.toml
 ```
 
 ## Notes
@@ -619,53 +630,55 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Monitor the direct NVIDIA Tenancy LLM enrichment run at 40 RPM/concurrency 6,
-   watching `rpm_window`, structured-output failures, retry rate, and
+1. Commit the Instructor-based Tenancy LLM code, then wait three minutes before
+   launching the direct NVIDIA run.
+2. Monitor the direct NVIDIA Tenancy LLM enrichment run at 40 RPM/concurrency
+   20, watching `rpm_window`, structured-output failures, retry rate, and
    documents/minute.
-2. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
+3. If `json_schema` proves unstable with `deepseek-ai/deepseek-v4-pro`, retry
+   with `json_mode` before falling back to `md_json`, since `md_json` has the
+   broadest compatibility but the weakest speed and accuracy profile.
+4. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-3. Resume Tenancy embedding for the converted legacy markdown with
+5. Resume Tenancy embedding for the converted legacy markdown with
    `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
    updated LanceDB row counts.
-4. If the Bifrost `nvidia/regular` smoke batch is stable, run full-corpus
-   Tenancy LLM enrichment idempotently; otherwise adjust the route weights or
-   fallbacks before scaling the run.
-5. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
+6. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.
-6. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
+7. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
    existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
-7. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
+8. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
    enabling Tenancy in public search.
-8. Update the landing search API and UI for multi-source citations, labels, and
+9. Update the landing search API and UI for multi-source citations, labels, and
    source filters.
-9. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
-10. Choose the Hugging Face dataset repo id, visibility, and license wording,
+10. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
+11. Choose the Hugging Face dataset repo id, visibility, and license wording,
    then publish with the exporter upload command.
-11. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+12. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
    stays living; use full snapshots by default and delta exports when append-only
    updates are useful.
-12. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+13. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-13. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+14. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-14. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+15. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-15. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+16. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-16. Continue expanding the reviewed eval manifest, especially with more
+17. Continue expanding the reviewed eval manifest, especially with more
    numeric/table-heavy FYI records and additional production failures once
    search logs expose them.
-17. Add optional local vLLM answer generation and answer-grounding checks to the
+18. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-18. Add exact query response caching for `/api/search` to reduce repeated answer
+19. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-19. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+20. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-20. Do a controlled live Cloudflare Email Sending test before sending to real
+21. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-21. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+22. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
