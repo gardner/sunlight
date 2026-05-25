@@ -459,7 +459,7 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(calls["model"], "deepseek-ai/deepseek-v4-pro")
         self.assertEqual(calls["response_model"], module.GeneratedEnrichmentBatch)
         self.assertEqual(calls["temperature"], 0)
-        self.assertEqual(calls["max_retries"], 3)
+        self.assertEqual(calls["max_retries"], 1)
         self.assertEqual(result.items[0].case_summary, "Parsed with Instructor.")
 
     def test_instructor_mode_names_resolve_to_instructor_modes(self):
@@ -503,6 +503,45 @@ class IngestTenancyTests(unittest.TestCase):
 
         self.assertEqual(events[0], ("sleep", 7))
         self.assertEqual(events[1], "rate_limit")
+
+    def test_request_retries_are_rate_limited(self):
+        module = load_module()
+        events = []
+
+        class FakeRateLimiter:
+            def wait(self):
+                events.append("rate_limit")
+                return SimpleNamespace(starts_last_60s=len(events), rpm_limit=40)
+
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("429")
+                return module.GeneratedEnrichmentBatch(items=[])
+
+        client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+        module.request_batch_with_rate_limit(
+            client,
+            module.LlmBatch(
+                markdown_paths=[Path("a.md")],
+                documents=[{"document_id": "doc_1"}],
+                prompt_tokens=100,
+            ),
+            "deepseek-ai/deepseek-v4-pro",
+            4096,
+            "instructor",
+            FakeRateLimiter(),
+            "json_schema",
+            (0, 0),
+            sleep=lambda seconds: events.append(("sleep", seconds)),
+        )
+
+        self.assertEqual(events, ["rate_limit", ("sleep", 2), "rate_limit"])
 
     def test_parse_enrichment_content_accepts_json_wrapped_in_text(self):
         module = load_module()

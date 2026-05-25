@@ -417,6 +417,11 @@ Completed:
   concurrency 20, and 3-15 seconds of random startup jitter so parallel workers
   do not burst the provider at launch. `json_mode` and `md_json` remain
   available as explicit fallback modes.
+* Stopped the first direct NVIDIA Instructor run after early 429s showed that
+  Instructor's internal retries were bypassing the outer RPM limiter. Fixed the
+  retry path so Instructor performs one provider attempt per outer attempt, and
+  every outer retry now passes through the shared `RequestRateLimiter` before
+  another provider call is made.
 
 ## Verification
 
@@ -587,6 +592,11 @@ uv run python -m unittest discover -s tests
 uv run ruff check scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py tests/test_ingest_tenancy.py
 uv run ruff check --select C901 scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py
 uv run pre-commit run --files scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py tests/test_ingest_tenancy.py PROGRESS.md pyproject.toml
+uv run python -m unittest tests.test_ingest_tenancy.IngestTenancyTests.test_request_generated_enrichment_can_use_instructor tests.test_ingest_tenancy.IngestTenancyTests.test_request_retries_are_rate_limited
+uv run python -m unittest tests.test_ingest_tenancy
+uv run python -m unittest discover -s tests
+uv run ruff check scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py tests/test_ingest_tenancy.py
+uv run pre-commit run --files scripts/tenancy_llm.py tests/test_ingest_tenancy.py
 ```
 
 ## Notes

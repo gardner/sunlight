@@ -447,28 +447,40 @@ def request_batch_with_rate_limit(
     *,
     sleep: Callable[[float], None] = time.sleep,
     random_uniform: Callable[[float, float], float] = random.uniform,
+    attempts: int = 3,
 ) -> GeneratedEnrichmentBatch:
     jitter_min, jitter_max = start_jitter_seconds
     if jitter_max > 0:
         sleep(max(0, random_uniform(jitter_min, jitter_max)))
-    snapshot = rate_limiter.wait()
-    print(
-        "LLM request start: "
-        f"started_at={utc_now_iso()} "
-        f"rpm_window={snapshot.starts_last_60s}/{snapshot.rpm_limit} "
-        f"files={len(batch.markdown_paths)} "
-        f"documents={len(batch.documents)} "
-        f"prompt_tokens={batch.prompt_tokens}",
-        flush=True,
-    )
-    return request_generated_enrichment_for_documents_with_retries(
-        client,
-        batch.documents,
-        model,
-        max_tokens,
-        api_mode=api_mode,
-        instructor_mode=instructor_mode,
-    )
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        snapshot = rate_limiter.wait()
+        print(
+            "LLM request start: "
+            f"started_at={utc_now_iso()} "
+            f"rpm_window={snapshot.starts_last_60s}/{snapshot.rpm_limit} "
+            f"attempt={attempt}/{attempts} "
+            f"files={len(batch.markdown_paths)} "
+            f"documents={len(batch.documents)} "
+            f"prompt_tokens={batch.prompt_tokens}",
+            flush=True,
+        )
+        try:
+            return request_generated_enrichment_for_documents(
+                client,
+                batch.documents,
+                model,
+                max_tokens,
+                api_mode=api_mode,
+                instructor_mode=instructor_mode,
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            sleep(min(2**attempt, 10))
+    assert last_error is not None
+    raise last_error
 
 
 def apply_batch_enrichment(
@@ -503,10 +515,9 @@ def request_generated_enrichment(
     api_mode: str = LLM_API_MODE_CHAT,
     instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
 ) -> GeneratedEnrichmentBatch:
-    documents = build_llm_input(markdown_paths, max_chars)
     return request_generated_enrichment_for_documents(
         client,
-        documents,
+        build_llm_input(markdown_paths, max_chars),
         model,
         max_tokens,
         api_mode=api_mode,
@@ -538,7 +549,7 @@ def request_generated_enrichment_for_documents(
             messages=build_enrichment_messages(documents),
             temperature=0,
             max_tokens=max_tokens,
-            max_retries=3,
+            max_retries=1,
         )
 
     response = client.chat.completions.create(
@@ -596,13 +607,8 @@ def request_generated_enrichment_with_retries(
     for attempt in range(1, attempts + 1):
         try:
             return request_generated_enrichment(
-                client,
-                markdown_paths,
-                model,
-                max_chars,
-                max_tokens,
-                api_mode=api_mode,
-                instructor_mode=instructor_mode,
+                client, markdown_paths, model, max_chars, max_tokens,
+                api_mode=api_mode, instructor_mode=instructor_mode,
             )
         except Exception as exc:
             last_error = exc
@@ -627,12 +633,8 @@ def request_generated_enrichment_for_documents_with_retries(
     for attempt in range(1, attempts + 1):
         try:
             return request_generated_enrichment_for_documents(
-                client,
-                documents,
-                model,
-                max_tokens,
-                api_mode=api_mode,
-                instructor_mode=instructor_mode,
+                client, documents, model, max_tokens,
+                api_mode=api_mode, instructor_mode=instructor_mode,
             )
         except Exception as exc:
             last_error = exc
