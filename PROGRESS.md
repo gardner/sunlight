@@ -446,6 +446,18 @@ Completed:
 * Updated the MiniMax request budget to match the actual limit of 4,500 model
   requests per 5 hours. The default is 12 RPM, which consumes 3,600 requests per
   5-hour window and leaves 900 requests of retry/probe headroom.
+* Probed NVIDIA `minimaxai/minimax-m2.7` with real Tenancy enrichment prompts
+  and actual markdown excerpts. A one-document request through chat completions
+  with `response_format={"type":"json_object"}` returned valid parseable JSON,
+  but took about 53 seconds end to end.
+* Tested scheduled-start NVIDIA `minimaxai/minimax-m2.7` real-data request
+  rates. A 40 RPM probe hit HTTP 429 after the first several starts, with body
+  `{"status":429,"title":"Too Many Requests"}`. A cooled-down 15 RPM probe
+  against 15 real documents returned 11 valid parsed enrichments and 4 HTTP
+  429s; successful request latency ranged from 26.14 to 63.47 seconds, with
+  36.54 seconds median. NVIDIA is therefore not safe to mix into the production
+  Tenancy enrichment run at 15+ scheduled RPM without a lower rate and/or
+  explicit in-flight cap.
 
 ## Verification
 
@@ -669,50 +681,54 @@ Important naming boundary:
    and monitor `rpm_window`, retry rate, structured-output failures, and
    documents/minute. At 43,831 pending one-document requests, the no-retry floor
    is about 61 hours at 12 RPM, and about 49 hours at the 15 RPM hard average.
-2. If `json_schema` proves unstable with `MiniMax-M2.7-highspeed`, retry with
+2. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
+   at 15+ scheduled RPM. If it is still worth using, first test a lower
+   scheduled rate with an explicit in-flight cap, then implement provider-level
+   caps before alternating providers.
+3. If `json_schema` proves unstable with `MiniMax-M2.7-highspeed`, retry with
    `json_mode` before falling back to `md_json`, since `md_json` has the
    broadest compatibility but the weakest speed and accuracy profile.
-3. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
+4. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-4. Resume Tenancy embedding for the converted legacy markdown with
+5. Resume Tenancy embedding for the converted legacy markdown with
    `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
    updated LanceDB row counts.
-5. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
+6. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.
-6. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
+7. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
    existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
-7. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
+8. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
    enabling Tenancy in public search.
-8. Update the landing search API and UI for multi-source citations, labels, and
+9. Update the landing search API and UI for multi-source citations, labels, and
    source filters.
-9. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
-10. Choose the Hugging Face dataset repo id, visibility, and license wording,
+10. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
+11. Choose the Hugging Face dataset repo id, visibility, and license wording,
    then publish with the exporter upload command.
-11. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+12. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
    stays living; use full snapshots by default and delta exports when append-only
    updates are useful.
-12. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+13. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-13. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+14. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-14. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+15. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-15. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+16. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-16. Continue expanding the reviewed eval manifest, especially with more
+17. Continue expanding the reviewed eval manifest, especially with more
    numeric/table-heavy FYI records and additional production failures once
    search logs expose them.
-17. Add optional local vLLM answer generation and answer-grounding checks to the
+18. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-18. Add exact query response caching for `/api/search` to reduce repeated answer
+19. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-19. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+20. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-20. Do a controlled live Cloudflare Email Sending test before sending to real
+21. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-21. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+22. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
