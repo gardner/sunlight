@@ -271,6 +271,43 @@ class IngestTenancyTests(unittest.TestCase):
 
         self.assertEqual([batch.markdown_paths for batch in batches], [paths[:2], paths[2:]])
 
+    def test_build_llm_batches_tokenizes_documents_linearly(self):
+        module = load_module()
+
+        class CountingTokenizer:
+            def __init__(self):
+                self.encoded_chars = 0
+
+            def encode(self, text):
+                self.encoded_chars += len(text)
+                return [None] * len(text)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            markdown_dir = Path(tmp_dir)
+            paths = []
+            for index in range(50):
+                path = markdown_dir / f"doc-{index}.md"
+                path.write_text(
+                    f'---\ndocument_id: "doc_justice_tenancy_{index}"\n'
+                    f'source: "justice_tenancy"\nparser: "docling"\n'
+                    f'pipeline_version: "{module.PIPELINE_VERSION}"\n---\n\n'
+                    f'{"a" * 200}',
+                    encoding="utf-8",
+                )
+                paths.append(path)
+
+            tokenizer = CountingTokenizer()
+            batches = module.build_llm_batches(
+                paths,
+                max_chars=200,
+                tokenizer=tokenizer,
+                prompt_token_budget=1_000_000,
+                max_batch_size=100,
+            )
+
+        self.assertEqual([batch.markdown_paths for batch in batches], [paths])
+        self.assertLess(tokenizer.encoded_chars, 100_000)
+
     def test_request_generated_enrichment_retries_transient_failures(self):
         module = load_module()
         tenancy_llm = sys.modules["tenancy_llm"]

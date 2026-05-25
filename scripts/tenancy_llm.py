@@ -20,6 +20,7 @@ from tenancy_corpus import (
 
 LLM_ENRICHMENT_VERSION = "tenancy-llm-v1"
 LLM_PROMPT_TOKEN_MARGIN = 1024
+LLM_BATCH_BUILD_PROGRESS_INTERVAL = 1000
 ENRICHMENT_SYSTEM_PROMPT = (
     "You enrich New Zealand Tenancy Tribunal decisions for retrieval. "
     "Return only valid JSON matching the requested schema. "
@@ -165,7 +166,10 @@ def build_llm_input(markdown_paths: list[Path], max_chars: int) -> list[dict[str
 def load_qwen_tokenizer(model: str):
     from transformers import AutoTokenizer
 
-    return AutoTokenizer.from_pretrained(model)
+    try:
+        return AutoTokenizer.from_pretrained(model, local_files_only=True)
+    except OSError:
+        return AutoTokenizer.from_pretrained(model)
 
 
 def build_llm_batches(
@@ -175,6 +179,7 @@ def build_llm_batches(
     tokenizer,
     prompt_token_budget: int,
     max_batch_size: int,
+    progress_interval: int = LLM_BATCH_BUILD_PROGRESS_INTERVAL,
 ) -> list[LlmBatch]:
     if not markdown_paths:
         return []
@@ -182,50 +187,123 @@ def build_llm_batches(
     batches: list[LlmBatch] = []
     current_paths: list[Path] = []
     current_documents: list[dict[str, object]] = []
+    current_document_tokens: list[int] = []
+    base_prompt_tokens = estimate_llm_batch_prompt_tokens([], tokenizer)
+    document_separator_tokens = len(tokenizer.encode(", "))
 
-    for path in markdown_paths:
+    for index, path in enumerate(markdown_paths, start=1):
         [document] = build_llm_input([path], max_chars)
-        candidate_documents = [*current_documents, document]
-        candidate_tokens = estimate_llm_batch_prompt_tokens(candidate_documents, tokenizer)
+        document_tokens = estimate_llm_document_tokens(document, tokenizer)
+        candidate_tokens = estimate_llm_batch_prompt_tokens_from_parts(
+            base_prompt_tokens,
+            [*current_document_tokens, document_tokens],
+            document_separator_tokens,
+        )
         would_exceed_tokens = current_documents and candidate_tokens > prompt_token_budget
         would_exceed_count = len(current_documents) >= max_batch_size
         if would_exceed_tokens or would_exceed_count:
-            batches.append(
-                LlmBatch(
-                    markdown_paths=current_paths,
-                    documents=current_documents,
-                    prompt_tokens=estimate_llm_batch_prompt_tokens(current_documents, tokenizer),
-                )
+            append_llm_batch(
+                batches,
+                current_paths,
+                current_documents,
+                tokenizer,
+                prompt_token_budget,
             )
             current_paths = []
             current_documents = []
-            candidate_documents = [document]
-            candidate_tokens = estimate_llm_batch_prompt_tokens(candidate_documents, tokenizer)
+            current_document_tokens = []
+            candidate_tokens = estimate_llm_batch_prompt_tokens_from_parts(
+                base_prompt_tokens,
+                [document_tokens],
+                document_separator_tokens,
+            )
 
         current_paths.append(path)
         current_documents.append(document)
+        current_document_tokens.append(document_tokens)
 
         if candidate_tokens > prompt_token_budget and len(current_documents) == 1:
-            batches.append(
-                LlmBatch(
-                    markdown_paths=current_paths,
-                    documents=current_documents,
-                    prompt_tokens=candidate_tokens,
-                )
+            append_llm_batch(
+                batches,
+                current_paths,
+                current_documents,
+                tokenizer,
+                prompt_token_budget,
             )
             current_paths = []
             current_documents = []
+            current_document_tokens = []
+
+        if progress_interval and index % progress_interval == 0:
+            print(
+                f"LLM batch build progress {index}/{len(markdown_paths)}: "
+                f"{len(batches)} request(s)",
+                flush=True,
+            )
 
     if current_documents:
-        batches.append(
-            LlmBatch(
-                markdown_paths=current_paths,
-                documents=current_documents,
-                prompt_tokens=estimate_llm_batch_prompt_tokens(current_documents, tokenizer),
-            )
+        append_llm_batch(
+            batches,
+            current_paths,
+            current_documents,
+            tokenizer,
+            prompt_token_budget,
         )
 
     return batches
+
+
+def append_llm_batch(
+    batches: list[LlmBatch],
+    markdown_paths: list[Path],
+    documents: list[dict[str, object]],
+    tokenizer,
+    prompt_token_budget: int,
+) -> None:
+    prompt_tokens = estimate_llm_batch_prompt_tokens(documents, tokenizer)
+    if prompt_tokens <= prompt_token_budget or len(documents) == 1:
+        batches.append(
+            LlmBatch(
+                markdown_paths=list(markdown_paths),
+                documents=list(documents),
+                prompt_tokens=prompt_tokens,
+            )
+        )
+        return
+
+    midpoint = max(1, len(documents) // 2)
+    append_llm_batch(
+        batches,
+        markdown_paths[:midpoint],
+        documents[:midpoint],
+        tokenizer,
+        prompt_token_budget,
+    )
+    append_llm_batch(
+        batches,
+        markdown_paths[midpoint:],
+        documents[midpoint:],
+        tokenizer,
+        prompt_token_budget,
+    )
+
+
+def estimate_llm_document_tokens(document: dict[str, object], tokenizer) -> int:
+    return len(tokenizer.encode(json.dumps(document, ensure_ascii=True)))
+
+
+def estimate_llm_batch_prompt_tokens_from_parts(
+    base_prompt_tokens: int,
+    document_tokens: list[int],
+    document_separator_tokens: int,
+) -> int:
+    if not document_tokens:
+        return base_prompt_tokens
+    return (
+        base_prompt_tokens
+        + sum(document_tokens)
+        + max(0, len(document_tokens) - 1) * document_separator_tokens
+    )
 
 
 def estimate_llm_batch_prompt_tokens(documents: list[dict[str, object]], tokenizer) -> int:
@@ -268,7 +346,9 @@ def enrich_with_llm(
     from openai import OpenAI
 
     client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+    print(f"Loading LLM tokenizer: {tokenizer_model}", flush=True)
     tokenizer = load_qwen_tokenizer(tokenizer_model)
+    print(f"Loaded LLM tokenizer: {tokenizer_model}", flush=True)
     effective_prompt_budget = effective_llm_prompt_token_budget(
         context_tokens=context_tokens,
         max_tokens=max_tokens,
