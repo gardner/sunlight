@@ -488,6 +488,17 @@ Completed:
   worked. Reasoning stayed separate from `message.content` for JSON-object mode
   and did not interfere with parsing. The real Tenancy `json_object` probe took
   7.42 seconds and the real Tenancy `json_schema` probe took 22.24 seconds.
+* Added explicit Tenancy chat request options for OpenRouter: chat mode can now
+  choose `json_object` or `json_schema`, and the CLI can pass repeated
+  `--llm-provider-ignore` values through OpenRouter provider routing. Kept the
+  existing MiniMax/Qwen chat default request body when no provider route is
+  supplied.
+* Tested paid OpenRouter `deepseek/deepseek-v4-flash` with
+  `provider.ignore=["deepinfra"]`. The routed real Tenancy probe was parseable
+  with both response formats; `json_schema` was faster in that sample
+  (`5.86s` versus `8.16s`) and kept reasoning separate from `message.content`.
+  A five-document temp-copy canary completed 5/5 enriched with 0 failures at
+  60 scheduled RPM.
 
 ## Verification
 
@@ -707,16 +718,16 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Run a paid OpenRouter `deepseek/deepseek-v4-flash` serial reliability sample
-   with real Tenancy documents, preferably starting with `json_schema` mode
-   because the capability probe showed valid schema output and lower cost than
-   `json_object`.
-2. If the OpenRouter DeepSeek serial sample stays stable, wire an explicit
-   OpenRouter provider path into Tenancy LLM enrichment and run a small
-   temp-copy canary before resuming the production backlog.
-3. Resume the direct MiniMax enrichment run if OpenRouter DeepSeek does not beat
-   its reliability. The corpus currently has 34,914 pending markdown files,
-   which is a no-retry floor of about 38.8 hours at 15 RPM.
+1. Launch and monitor paid OpenRouter `deepseek/deepseek-v4-flash` production
+   Tenancy enrichment with `--llm-rpm 60`, `--llm-concurrency 30`,
+   `--llm-api-mode chat`, `--llm-chat-response-format json_schema`, and
+   `--llm-provider-ignore deepinfra`.
+2. Watch the first production hour for parse failures, HTTP 429s, long-tail
+   stalls, and effective request start rate before assuming the full backlog is
+   stable.
+3. Resume the direct MiniMax enrichment run only if OpenRouter DeepSeek does not
+   beat its reliability. The corpus currently has 34,914 pending markdown files,
+   which is a no-retry floor of about 9.7 hours at 60 RPM.
 4. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
    at 15+ scheduled RPM. If it is still worth using, first test a lower
    scheduled rate with an explicit in-flight cap, then implement provider-level

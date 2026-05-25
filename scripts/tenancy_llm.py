@@ -22,6 +22,7 @@ from tenancy_instructor import (
     instructor_client,
 )
 from tenancy_llm_messages import build_enrichment_messages
+from tenancy_llm_request import ChatRequestOptions, chat_completion_kwargs
 from tenancy_rate_limit import RequestRateLimiter
 
 
@@ -323,6 +324,7 @@ def enrich_with_llm(
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
     instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
+    chat_options: ChatRequestOptions | None = None,
     start_jitter_seconds: tuple[float, float] = (0, 0),
 ) -> dict[str, int]:
     from openai import OpenAI
@@ -358,6 +360,7 @@ def enrich_with_llm(
         max_tokens=max_tokens,
         api_mode=api_mode,
         instructor_mode=instructor_mode,
+        chat_options=chat_options,
         start_jitter_seconds=start_jitter_seconds,
         rpm=rpm,
         concurrency=concurrency,
@@ -373,6 +376,7 @@ def enrich_batches_with_llm(
     max_tokens: int,
     api_mode: str,
     instructor_mode: str,
+    chat_options: ChatRequestOptions | None,
     start_jitter_seconds: tuple[float, float],
     rpm: int,
     concurrency: int,
@@ -393,15 +397,8 @@ def enrich_batches_with_llm(
                 return
             batch = batches[next_batch_index]
             future = executor.submit(
-                request_batch_with_rate_limit,
-                client,
-                batch,
-                model,
-                max_tokens,
-                api_mode,
-                rate_limiter,
-                instructor_mode,
-                start_jitter_seconds,
+                request_batch_with_rate_limit, client, batch, model, max_tokens, api_mode,
+                rate_limiter, instructor_mode, start_jitter_seconds, chat_options,
             )
             pending[future] = (next_batch_index, batch)
             next_batch_index += 1
@@ -444,6 +441,7 @@ def request_batch_with_rate_limit(
     rate_limiter: RequestRateLimiter,
     instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
     start_jitter_seconds: tuple[float, float] = (0, 0),
+    chat_options: ChatRequestOptions | None = None,
     *,
     sleep: Callable[[float], None] = time.sleep,
     random_uniform: Callable[[float, float], float] = random.uniform,
@@ -467,12 +465,8 @@ def request_batch_with_rate_limit(
         )
         try:
             return request_generated_enrichment_for_documents(
-                client,
-                batch.documents,
-                model,
-                max_tokens,
-                api_mode=api_mode,
-                instructor_mode=instructor_mode,
+                client, batch.documents, model, max_tokens, api_mode=api_mode,
+                instructor_mode=instructor_mode, chat_options=chat_options,
             )
         except Exception as exc:
             last_error = exc
@@ -514,14 +508,11 @@ def request_generated_enrichment(
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
     instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
+    chat_options: ChatRequestOptions | None = None,
 ) -> GeneratedEnrichmentBatch:
     return request_generated_enrichment_for_documents(
-        client,
-        build_llm_input(markdown_paths, max_chars),
-        model,
-        max_tokens,
-        api_mode=api_mode,
-        instructor_mode=instructor_mode,
+        client, build_llm_input(markdown_paths, max_chars), model, max_tokens,
+        api_mode=api_mode, instructor_mode=instructor_mode, chat_options=chat_options,
     )
 
 
@@ -532,6 +523,7 @@ def request_generated_enrichment_for_documents(
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
     instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
+    chat_options: ChatRequestOptions | None = None,
 ) -> GeneratedEnrichmentBatch:
     if api_mode == LLM_API_MODE_RESPONSES:
         response = client.responses.parse(
@@ -558,12 +550,11 @@ def request_generated_enrichment_for_documents(
         return parsed
 
     response = client.chat.completions.create(
-        model=model,
-        messages=build_enrichment_messages(documents),
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        response_format={"type": "json_object"},
-        temperature=0,
-        max_tokens=max_tokens,
+        **chat_completion_kwargs(
+            model=model, messages=build_enrichment_messages(documents), max_tokens=max_tokens,
+            response_schema=GeneratedEnrichmentBatch.model_json_schema(),
+            options=chat_options,
+        )
     )
     content = response.choices[0].message.content or ""
     default_document_id = str(documents[0]["document_id"]) if len(documents) == 1 else None

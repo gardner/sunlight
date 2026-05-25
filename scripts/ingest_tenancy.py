@@ -53,6 +53,12 @@ from tenancy_llm import (
     request_generated_enrichment_for_documents_with_retries,
     request_generated_enrichment_with_retries,
 )
+from tenancy_llm_request import (
+    CHAT_RESPONSE_FORMAT_CHOICES,
+    ChatRequestOptions,
+    DEFAULT_CHAT_RESPONSE_FORMAT,
+    build_provider_extra_body,
+)
 
 
 __all__ = [
@@ -194,6 +200,18 @@ def build_parser(
     parser.add_argument("--llm-max-tokens", type=int, default=DEFAULT_LLM_MAX_TOKENS)
     parser.add_argument("--llm-start-jitter-min", type=float, default=DEFAULT_LLM_START_JITTER_MIN)
     parser.add_argument("--llm-start-jitter-max", type=float, default=DEFAULT_LLM_START_JITTER_MAX)
+    parser.add_argument(
+        "--llm-chat-response-format",
+        choices=CHAT_RESPONSE_FORMAT_CHOICES,
+        default=env.get("TENANCY_LLM_CHAT_RESPONSE_FORMAT", DEFAULT_CHAT_RESPONSE_FORMAT),
+        help="Response format for --llm-api-mode=chat.",
+    )
+    parser.add_argument(
+        "--llm-provider-ignore",
+        action="append",
+        default=[],
+        help="Provider slug to ignore through OpenRouter provider routing; repeat as needed.",
+    )
     parser.add_argument(
         "--llm-api-mode",
         choices=("chat", "responses", "instructor"),
@@ -582,6 +600,10 @@ def main() -> int:
                 max_tokens=args.llm_max_tokens,
                 api_mode=args.llm_api_mode,
                 instructor_mode=args.llm_instructor_mode,
+                chat_options=ChatRequestOptions(
+                    args.llm_chat_response_format,
+                    build_provider_extra_body(args.llm_provider_ignore),
+                ),
                 start_jitter_seconds=(
                     args.llm_start_jitter_min,
                     args.llm_start_jitter_max,

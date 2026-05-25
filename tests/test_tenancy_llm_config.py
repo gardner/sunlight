@@ -49,6 +49,27 @@ class TenancyLlmConfigTests(unittest.TestCase):
 
         self.assertEqual(args.llm_model, "MiniMax-M2.7-highspeed")
 
+    def test_openrouter_provider_and_response_format_flags_are_explicit(self):
+        module = load_module()
+
+        args = module.build_parser(env={}, dotenv_path=Path("/missing/.env")).parse_args(
+            [
+                "--llm-chat-response-format",
+                "json_schema",
+                "--llm-provider-ignore",
+                "deepinfra",
+                "--llm-provider-ignore",
+                "somewhere-else",
+            ]
+        )
+
+        self.assertEqual(args.llm_chat_response_format, "json_schema")
+        self.assertEqual(args.llm_provider_ignore, ["deepinfra", "somewhere-else"])
+        self.assertEqual(
+            module.build_provider_extra_body(args.llm_provider_ignore),
+            {"provider": {"ignore": ["deepinfra", "somewhere-else"]}},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

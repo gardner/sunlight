@@ -31,6 +31,13 @@ Do not add `stepfun-ai/step-3.5-flash` to the current parser path. With
 `reasoning_content` while `message.content` is empty. Nineteen serial real
 requests all failed parsing for this reason.
 
+For paid OpenRouter `deepseek/deepseek-v4-flash`, prefer the explicit
+`json_schema` chat response format with OpenRouter provider routing
+`{"ignore":["deepinfra"]}`. The routed probe returned parseable real Tenancy
+output in 5.86 seconds, with reasoning separate from `message.content`; a
+five-document temp-copy canary then completed 5/5 with no failures at 60
+scheduled RPM.
+
 ## Probe Artifacts
 
 Raw logs and JSONL:
@@ -47,6 +54,12 @@ OpenRouter probes:
 
 * `logs/openrouter-deepseek-v4-flash-capabilities-20260526-095918.log`
 * `logs/openrouter-deepseek-v4-flash-capabilities-20260526-095918.jsonl`
+* `logs/openrouter-deepseek-v4-flash-quantization-20260526-101059.log`
+* `logs/openrouter-deepseek-v4-flash-quantization-20260526-101059.jsonl`
+* `logs/openrouter-deepseek-v4-flash-fp8-20260526-101221.log`
+* `logs/openrouter-deepseek-v4-flash-fp8-20260526-101221.jsonl`
+* `logs/openrouter-deepseek-v4-flash-ignore-deepinfra-20260526-101315.log`
+* `logs/openrouter-deepseek-v4-flash-ignore-deepinfra-20260526-101315.jsonl`
 
 Reusable harness:
 
@@ -68,7 +81,7 @@ uv run python scripts/probe_nvidia_tenancy_models.py \
 
 | Provider | Model | Plain chat content | JSON object content | JSON schema response format | Reasoning behavior | Real Tenancy parse | Latency observed | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| OpenRouter | `deepseek/deepseek-v4-flash` | OK: `message.content="ok"` | OK: simple JSON object parsed from `message.content` | OK: simple JSON schema parsed; real Tenancy schema parsed | Reasoning is separate when enabled and does not interfere with `message.content`; JSON schema calls returned no reasoning tokens | OK with real Tenancy `json_object` and real Tenancy `json_schema`, correct document ID and non-empty fields | Plain `3.19s`; simple `json_object` `6.48s`; simple `json_schema` `1.60s`; Tenancy `json_object` `7.42s`; Tenancy `json_schema` `22.24s` | Strong paid candidate; next step is a serial reliability/rate sample |
+| OpenRouter | `deepseek/deepseek-v4-flash` | OK: `message.content="ok"` | OK: simple JSON object parsed from `message.content` | OK: simple JSON schema parsed; real Tenancy schema parsed | Reasoning is separate when enabled and does not interfere with `message.content`; routed schema calls also returned reasoning separately | OK with real Tenancy `json_object` and real Tenancy `json_schema`, correct document ID and non-empty fields | Plain `3.19s`; simple `json_object` `6.48s`; simple `json_schema` `1.60s`; Tenancy `json_object` `7.42s`; Tenancy `json_schema` `22.24s`; `ignore deepinfra` Tenancy `json_schema` `5.86s` | Strong paid candidate; production path uses `json_schema` plus `provider.ignore=["deepinfra"]` |
 
 OpenRouter `deepseek/deepseek-v4-flash` notes:
 
@@ -82,6 +95,13 @@ OpenRouter `deepseek/deepseek-v4-flash` notes:
   OpenRouter usage metadata.
 * Both real Tenancy probes returned the exact expected document ID
   `doc_justice_tenancy_172069933` and non-empty retrieval fields.
+* `provider.quantizations=["fp8"]` worked for both real Tenancy `json_object`
+  and `json_schema`; observed latencies were `8.35s` and `9.25s`.
+* `provider.ignore=["deepinfra"]` worked for both real Tenancy `json_object`
+  and `json_schema`; observed latencies were `8.16s` and `5.86s`.
+* OpenRouter provider selection treats `quantizations` as a filter. Ignoring
+  `deepinfra` is the current production choice because it avoids the known fp4
+  route without requiring a single quantization bucket.
 
 ### NVIDIA Capability Matrix
 
