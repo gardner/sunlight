@@ -25,7 +25,7 @@ class IngestTenancyTests(unittest.TestCase):
     def test_defaults_target_docling_tenancy_storage(self):
         module = load_module()
 
-        args = module.build_parser().parse_args([])
+        args = module.build_parser(env={}, dotenv_path=Path("/missing/.env")).parse_args([])
 
         self.assertEqual(args.pdf_dir, Path("justice/data/tenancy/pdfs"))
         self.assertEqual(args.legacy_pdf_dir, Path("justice/data/tenancy/legacy/pdf"))
@@ -34,13 +34,13 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(args.persist_dir, Path("storage/justice/tenancy/lancedb"))
         self.assertEqual(args.convert_gpu, "0")
         self.assertEqual(args.embed_gpu, "0")
-        self.assertEqual(args.llm_base_url, "https://integrate.api.nvidia.com/v1")
+        self.assertEqual(args.llm_base_url, "https://api.minimax.io/v1")
         self.assertEqual(args.llm_api_key, "")
-        self.assertEqual(args.llm_model, "deepseek-ai/deepseek-v4-pro")
+        self.assertEqual(args.llm_model, "MiniMax-M2.7-highspeed")
         self.assertEqual(args.llm_tokenizer_model, "Qwen/Qwen3.6-27B")
         self.assertEqual(args.llm_context_tokens, 131072)
         self.assertEqual(args.llm_prompt_token_budget, 14336)
-        self.assertEqual(args.llm_rpm, 40)
+        self.assertEqual(args.llm_rpm, 12)
         self.assertEqual(args.llm_batch_size, 1)
         self.assertEqual(args.llm_concurrency, 20)
         self.assertEqual(args.llm_timeout, 120)
@@ -437,13 +437,9 @@ class IngestTenancyTests(unittest.TestCase):
         class FakeCompletions:
             def create(self, **kwargs):
                 calls.update(kwargs)
-                return module.GeneratedEnrichmentBatch(
-                    items=[
-                        module.GeneratedEnrichment(
-                            document_id="doc_justice_tenancy_1",
-                            case_summary="Parsed with Instructor.",
-                        )
-                    ]
+                return module.GeneratedEnrichment(
+                    document_id="doc_justice_tenancy_1",
+                    case_summary="Parsed with Instructor.",
                 )
 
         client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
@@ -457,9 +453,9 @@ class IngestTenancyTests(unittest.TestCase):
         )
 
         self.assertEqual(calls["model"], "deepseek-ai/deepseek-v4-pro")
-        self.assertEqual(calls["response_model"], module.GeneratedEnrichmentBatch)
+        self.assertEqual(calls["response_model"], module.GeneratedEnrichment)
         self.assertEqual(calls["temperature"], 0)
-        self.assertEqual(calls["max_retries"], 1)
+        self.assertEqual((calls["max_retries"], calls["extra_body"]), (1, {"reasoning_split": True}))
         self.assertEqual(result.items[0].case_summary, "Parsed with Instructor.")
 
     def test_instructor_mode_names_resolve_to_instructor_modes(self):

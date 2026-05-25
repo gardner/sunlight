@@ -5,6 +5,7 @@ import gc
 import multiprocessing as mp
 import os
 import time
+from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
 
@@ -92,13 +93,14 @@ DEFAULT_EMBED_BATCH_SIZE = 128
 DEFAULT_CHUNK_SIZE = 8192
 DEFAULT_CHUNK_OVERLAP = 128
 DEFAULT_MODEL_EMBED_BATCH_SIZE = 8
-DEFAULT_LLM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+DEFAULT_DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+DEFAULT_LLM_BASE_URL = "https://api.minimax.io/v1"
 DEFAULT_LLM_API_KEY = ""
-DEFAULT_LLM_MODEL = "deepseek-ai/deepseek-v4-pro"
+DEFAULT_LLM_MODEL = "MiniMax-M2.7-highspeed"
 DEFAULT_LLM_TOKENIZER_MODEL = "Qwen/Qwen3.6-27B"
 DEFAULT_LLM_CONTEXT_TOKENS = 131072
 DEFAULT_LLM_PROMPT_TOKEN_BUDGET = 14336
-DEFAULT_LLM_RPM = 40
+DEFAULT_LLM_RPM = 12
 DEFAULT_LLM_BATCH_SIZE = 1
 DEFAULT_LLM_CONCURRENCY = 20
 DEFAULT_LLM_MAX_CHARS = 5000
@@ -112,7 +114,35 @@ EMBED_PIPELINE_VERSION = f"{PIPELINE_VERSION}-qwen3-views-v1"
 _cached_converter = None
 
 
-def build_parser() -> argparse.ArgumentParser:
+def load_dotenv_values(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip("\"'")
+    return values
+
+
+def default_llm_api_key(env: Mapping[str, str], dotenv: Mapping[str, str]) -> str:
+    return (
+        env.get("TENANCY_LLM_API_KEY")
+        or env.get("MINIMAX_API_KEY")
+        or dotenv.get("MINIMAX_API_KEY")
+        or DEFAULT_LLM_API_KEY
+    )
+
+
+def build_parser(
+    *,
+    env: Mapping[str, str] | None = None,
+    dotenv_path: Path = DEFAULT_DOTENV_PATH,
+) -> argparse.ArgumentParser:
+    env = os.environ if env is None else env
+    dotenv = load_dotenv_values(dotenv_path)
     parser = argparse.ArgumentParser(
         description=(
             "Ingest Tenancy Tribunal PDFs as a first-class hybrid-search corpus: "
@@ -142,12 +172,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
     parser.add_argument("--chunk-overlap", type=int, default=DEFAULT_CHUNK_OVERLAP)
     parser.add_argument("--model-embed-batch-size", type=int, default=DEFAULT_MODEL_EMBED_BATCH_SIZE)
-    parser.add_argument("--llm-base-url", default=os.environ.get("TENANCY_LLM_BASE_URL", DEFAULT_LLM_BASE_URL))
-    parser.add_argument("--llm-api-key", default=os.environ.get("TENANCY_LLM_API_KEY", DEFAULT_LLM_API_KEY))
-    parser.add_argument("--llm-model", default=os.environ.get("TENANCY_LLM_MODEL", DEFAULT_LLM_MODEL))
+    parser.add_argument("--llm-base-url", default=env.get("TENANCY_LLM_BASE_URL", DEFAULT_LLM_BASE_URL))
+    parser.add_argument("--llm-api-key", default=default_llm_api_key(env, dotenv))
+    parser.add_argument("--llm-model", default=DEFAULT_LLM_MODEL)
     parser.add_argument(
         "--llm-tokenizer-model",
-        default=os.environ.get("TENANCY_LLM_TOKENIZER_MODEL", DEFAULT_LLM_TOKENIZER_MODEL),
+        default=env.get("TENANCY_LLM_TOKENIZER_MODEL", DEFAULT_LLM_TOKENIZER_MODEL),
     )
     parser.add_argument("--llm-context-tokens", type=int, default=DEFAULT_LLM_CONTEXT_TOKENS)
     parser.add_argument(
@@ -167,13 +197,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--llm-api-mode",
         choices=("chat", "responses", "instructor"),
-        default=os.environ.get("TENANCY_LLM_API_MODE", LLM_API_MODE_INSTRUCTOR),
+        default=env.get("TENANCY_LLM_API_MODE", LLM_API_MODE_INSTRUCTOR),
         help="Use chat completions, Responses API structured parsing, or Instructor for enrichment.",
     )
     parser.add_argument(
         "--llm-instructor-mode",
         choices=INSTRUCTOR_MODE_CHOICES,
-        default=os.environ.get("TENANCY_LLM_INSTRUCTOR_MODE", DEFAULT_INSTRUCTOR_MODE),
+        default=env.get("TENANCY_LLM_INSTRUCTOR_MODE", DEFAULT_INSTRUCTOR_MODE),
         help="Instructor mode used when --llm-api-mode=instructor.",
     )
     return parser

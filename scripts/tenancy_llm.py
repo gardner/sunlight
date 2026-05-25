@@ -418,7 +418,7 @@ def enrich_batches_with_llm(
                 except Exception as exc:
                     counts["failed"] += len(batch.markdown_paths)
                     processed += len(batch.markdown_paths)
-                    print(f"LLM enrichment failed for batch {batch_index + 1}: {exc}", flush=True)
+                    print(f"LLM enrichment failed for request {batch_index + 1}: {exc}", flush=True)
                     submit_next()
                     continue
 
@@ -426,7 +426,7 @@ def enrich_batches_with_llm(
                 processed += len(batch.markdown_paths)
                 print(
                     f"LLM enrichment progress {processed}/{total_files}: {counts} "
-                    f"(batch {batch_index + 1}/{len(batches)}, "
+                    f"(request {batch_index + 1}/{len(batches)}, "
                     f"files={len(batch.markdown_paths)}, prompt_tokens={batch.prompt_tokens})",
                     flush=True,
                 )
@@ -543,14 +543,19 @@ def request_generated_enrichment_for_documents(
         return response.output_parsed
 
     if api_mode == LLM_API_MODE_INSTRUCTOR:
-        return client.chat.completions.create(
+        response_model = GeneratedEnrichment if len(documents) == 1 else GeneratedEnrichmentBatch
+        parsed = client.chat.completions.create(
             model=model,
-            response_model=GeneratedEnrichmentBatch,
+            response_model=response_model,
             messages=build_enrichment_messages(documents),
             temperature=0,
             max_tokens=max_tokens,
             max_retries=1,
+            extra_body={"reasoning_split": True},
         )
+        if isinstance(parsed, GeneratedEnrichment):
+            return GeneratedEnrichmentBatch(items=[parsed])
+        return parsed
 
     response = client.chat.completions.create(
         model=model,
