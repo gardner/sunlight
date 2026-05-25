@@ -1,7 +1,8 @@
 # Bifrost
 
-This directory contains a repo-local copy of the Bifrost gateway config used for
-LLM routing during local ingestion and eval work.
+This directory contains a repo-local copy of the Bifrost gateway config from
+`/home/dev/src/bifrost/config.json`, used for LLM routing during local ingestion
+and eval work.
 
 The provider keys live in `bifrost/.env`, which is intentionally ignored by git.
 The committed `config.json` references provider keys and the virtual gateway key
@@ -38,8 +39,26 @@ To replace the old `8080` gateway, stop the existing container first or set
 
 ## Debugging Slow Fallbacks
 
-Debug logging is enabled with `LOG_LEVEL=debug` and `LOG_STYLE=json`. Start by
-comparing provider, model, HTTP status, duration, and fallback attempts in the
-logs for the slow requests. The recent symptoms point at fallback/provider paths
-that either return `413` quickly or stall until the gateway timeout, which can
-make successful requests look much slower than the winning provider actually is.
+Debug logging is enabled with `LOG_LEVEL=debug` and `LOG_STYLE=json`.
+
+The copied routing rules are intentionally explicit:
+
+- CEL uses `provider` and `model`, not `request.model`.
+- Every routing rule has `scope: "global"`.
+- OpenRouter targets use OpenRouter aliases such as `regular-openrouter`
+  instead of carrying the incoming NVIDIA model alias.
+- Fallbacks use `provider/model` values, such as
+  `openrouter/regular-openrouter`, because bare provider names are ignored by
+  Bifrost fallback parsing.
+
+If you change `config.json`, reset the ignored local runtime DB before
+restarting so Bifrost imports the file again:
+
+```sh
+docker compose -f bifrost/docker-compose.yml --env-file bifrost/.env down
+rm -f bifrost/data/config.db*
+docker compose -f bifrost/docker-compose.yml --env-file bifrost/.env up -d
+```
+
+Then compare provider, model, HTTP status, duration, and fallback attempts in
+the logs for slow requests.

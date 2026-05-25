@@ -390,12 +390,16 @@ Completed:
   seconds, making full-corpus enrichment multi-day at current throughput.
   `groq/regular-groq` followed the schema quickly, but its 8k TPM limit makes
   it unsuitable for useful full-corpus batching.
-* Copied the active Bifrost gateway setup into `bifrost/` with a repo-local
-  Docker Compose wrapper, ignored local `.env`, debug JSON logging, and
-  environment-referenced provider plus virtual keys. Verified the debug gateway
-  boots on `localhost:8081`, lists 22 models, and routes minimal chat probes
-  through NVIDIA, Groq, OpenRouter free, and OpenRouter paid without invoking
-  fallbacks.
+* Copied the load-balanced Bifrost gateway setup from
+  `/home/dev/src/bifrost/config.json` into `bifrost/` with a repo-local Docker
+  Compose wrapper, ignored local `.env`, debug JSON logging, and
+  environment-referenced provider plus virtual keys. Fixed the copied routing
+  rules for the current Bifrost runtime by replacing invalid `request.model`
+  CEL with `provider`/`model`, adding explicit `global` scope, setting
+  provider-specific target model aliases, and changing fallback entries to
+  `provider/model` form. Verified the debug gateway boots on `localhost:8081`
+  and that `nvidia/regular` now logs matched routing decisions for both NVIDIA
+  and OpenRouter weighted targets.
 
 ## Verification
 
