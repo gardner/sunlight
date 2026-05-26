@@ -295,6 +295,23 @@ A Henwood 17 August 2020
             "questions_answered": [
                 "When will the tenancy terminate if arrears are not paid?"
             ],
+            "applicant_story": (
+                "The landlord says the tenant fell behind on rent and asks for termination."
+            ),
+            "respondent_story": (
+                "The tenant says they can catch up if given time to pay."
+            ),
+            "neutral_fact_pattern": (
+                "A residential tenancy dispute involved rent arrears and possible termination."
+            ),
+            "claims_made": [
+                "The tenant owed rent arrears.",
+                "The arrears justified termination.",
+            ],
+            "remedies_sought": [
+                "Termination of the tenancy.",
+                "Payment of arrears.",
+            ],
             "legal_principles": [
                 {
                     "principle": "Rent arrears may support a conditional termination order.",
@@ -314,6 +331,11 @@ A Henwood 17 August 2020
         self.assertIn("tenancy terminate", views["questions_answered"].text)
         self.assertIn("Rent arrears", views["catchwords"].text)
         self.assertIn("Rent arrears may support", views["legal_principles"].text)
+        self.assertIn("landlord says", views["applicant_story"].text)
+        self.assertIn("tenant says", views["respondent_story"].text)
+        self.assertIn("rent arrears", views["neutral_fact_pattern"].text)
+        self.assertIn("owed rent arrears", views["claims_made"].text)
+        self.assertIn("Payment of arrears", views["remedies_sought"].text)
 
 
 if __name__ == "__main__":

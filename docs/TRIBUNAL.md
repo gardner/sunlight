@@ -116,8 +116,9 @@ Implemented:
   `source_page_url`, Tenancy IDs, citation/date fields, issue tags, and statute
   sections.
 * Retrieval documents now include the original source text plus generated views
-  for `case_summary`, `catchwords`, `questions_answered`, and
-  `legal_principles` when those fields exist.
+  for `case_summary`, `catchwords`, `questions_answered`, `applicant_story`,
+  `respondent_story`, `neutral_fact_pattern`, `claims_made`,
+  `remedies_sought`, and `legal_principles` when those fields exist.
 
 Completed local import:
 
@@ -313,6 +314,11 @@ remain marked as generated:
 case_summary
 catchwords
 questions_answered
+applicant_story
+respondent_story
+neutral_fact_pattern
+claims_made
+remedies_sought
 legal_principles
 llm_suggested_tags
 chunk_context
@@ -374,6 +380,11 @@ The high-value Tenancy-specific enrichment set is:
     "When will the tenancy terminate if rent arrears are not paid?",
     "What repayment schedule did the Tribunal order?"
   ],
+  "applicant_story": "Generated applicant-side story for story-to-case retrieval.",
+  "respondent_story": "Generated respondent-side story for story-to-case retrieval.",
+  "neutral_fact_pattern": "Generated neutral fact pattern without the outcome.",
+  "claims_made": ["Generated party claim or allegation."],
+  "remedies_sought": ["Generated remedy or order sought."],
   "case_summary": "Generated neutral summary for retrieval and display.",
   "catchwords": ["Residential tenancy", "Rent arrears", "Conditional termination"],
   "legal_principles": [

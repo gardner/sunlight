@@ -291,6 +291,22 @@ Then embed the questions and link each embedding back to the source document or 
 
 This improves retrieval when the user asks a question that does not use the same wording as the decision.
 
+Story-shaped generated views can support users typing their side of a dispute
+in plain language:
+
+```json
+{
+  "applicant_story": "The applicant says...",
+  "respondent_story": "The respondent says...",
+  "neutral_fact_pattern": "The dispute involved...",
+  "claims_made": ["The party claimed..."],
+  "remedies_sought": ["The party asked for..."]
+}
+```
+
+These are synthetic retrieval views, not source documents. Mark them
+`generated=true` and keep them separate from source-text embeddings.
+
 ---
 
 ### 8. Short neutral summary
@@ -494,6 +510,9 @@ tenancy_substantive_decisions
 tenancy_boilerplate_procedure
 tenancy_case_summaries
 tenancy_questions_answered
+tenancy_applicant_stories
+tenancy_respondent_stories
+tenancy_neutral_fact_patterns
 tenancy_legal_principles
 ```
 
@@ -514,6 +533,11 @@ For an MVP, I’d use this set:
   "monetary_orders": [],
   "legal_issue_tags": [],
   "questions_answered": [],
+  "applicant_story": "",
+  "respondent_story": "",
+  "neutral_fact_pattern": "",
+  "claims_made": [],
+  "remedies_sought": [],
   "case_summary": "",
   "legal_principles": [],
   "boilerplate_removed": true,

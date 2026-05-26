@@ -109,7 +109,6 @@ DEFAULT_LLM_PROMPT_TOKEN_BUDGET = 14336
 DEFAULT_LLM_RPM = 12
 DEFAULT_LLM_BATCH_SIZE = 1
 DEFAULT_LLM_CONCURRENCY = 20
-DEFAULT_LLM_MAX_CHARS = 5000
 DEFAULT_LLM_TIMEOUT = 120
 DEFAULT_LLM_MAX_TOKENS = 4096
 DEFAULT_LLM_START_JITTER_MIN = 3
@@ -195,7 +194,6 @@ def build_parser(
     parser.add_argument("--llm-rpm", type=int, default=DEFAULT_LLM_RPM)
     parser.add_argument("--llm-batch-size", type=int, default=DEFAULT_LLM_BATCH_SIZE)
     parser.add_argument("--llm-concurrency", type=int, default=DEFAULT_LLM_CONCURRENCY)
-    parser.add_argument("--llm-max-chars", type=int, default=DEFAULT_LLM_MAX_CHARS)
     parser.add_argument("--llm-timeout", type=int, default=DEFAULT_LLM_TIMEOUT)
     parser.add_argument("--llm-max-tokens", type=int, default=DEFAULT_LLM_MAX_TOKENS)
     parser.add_argument("--llm-start-jitter-min", type=float, default=DEFAULT_LLM_START_JITTER_MIN)
@@ -518,7 +516,6 @@ def validate_args(args: argparse.Namespace) -> None:
         "llm_rpm",
         "llm_batch_size",
         "llm_concurrency",
-        "llm_max_chars",
         "llm_timeout",
         "llm_max_tokens",
     ):
@@ -595,7 +592,6 @@ def main() -> int:
                 rpm=args.llm_rpm,
                 batch_size=args.llm_batch_size,
                 concurrency=args.llm_concurrency,
-                max_chars=args.llm_max_chars,
                 timeout=args.llm_timeout,
                 max_tokens=args.llm_max_tokens,
                 api_mode=args.llm_api_mode,

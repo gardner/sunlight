@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -33,7 +34,7 @@ class TenancyLlmRequestOptionsTests(unittest.TestCase):
 
         module.request_generated_enrichment_for_documents(
             client,
-            [{"document_id": "doc_1", "excerpt": "body"}],
+            [{"document_id": "doc_1", "document_text": "body"}],
             "deepseek/deepseek-v4-flash",
             max_tokens=4096,
             chat_options=module.ChatRequestOptions(
@@ -46,6 +47,25 @@ class TenancyLlmRequestOptionsTests(unittest.TestCase):
         self.assertEqual(calls["response_format"]["type"], "json_schema")
         self.assertEqual(calls["response_format"]["json_schema"]["strict"], True)
         self.assertIn("items", calls["response_format"]["json_schema"]["schema"]["properties"])
+
+    def test_error_summary_includes_http_response_message(self):
+        module = load_module()
+
+        class FakeResponse:
+            text = '{"error":{"message":"rate limited"}}'
+
+            def json(self):
+                return {"error": {"message": "rate limited", "code": 429}}
+
+        exc = RuntimeError("429 Too Many Requests")
+        exc.status_code = 429
+        exc.response = FakeResponse()
+
+        summary = json.loads(module.llm_error_summary(exc))
+
+        self.assertEqual(summary["status_code"], 429)
+        self.assertEqual(summary["response_message"], "rate limited")
+        self.assertEqual(summary["response_json"]["error"]["code"], 429)
 
 
 if __name__ == "__main__":

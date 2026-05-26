@@ -499,6 +499,26 @@ Completed:
   (`5.86s` versus `8.16s`) and kept reasoning separate from `message.content`.
   A five-document temp-copy canary completed 5/5 enriched with 0 failures at
   60 scheduled RPM.
+* Audited the Tenancy LLM truncation incident in `docs/DESTROYED_DATA.md`.
+  Confirmed that source PDFs and markdown bodies were not truncated by the LLM
+  path, but all `tenancy-llm-v1` generated frontmatter metadata is suspect.
+* Removed exact standalone `## Please read carefully:` post-ambles from 43,672
+  Tenancy markdown bodies, leaving 43,854 non-empty parseable markdown bodies.
+  The run wrote before/after hashes to
+  `logs/tenancy-postamble-removal-20260526-110737.jsonl`; six OCR/conversion
+  phrase outliers required follow-up review.
+* Cleaned the six remaining Tenancy `Please read carefully:` OCR/conversion
+  outliers while leaving `doc_justice_tenancy_206727790.md` untouched. Preserved
+  adjudicator/date blocks that appeared after malformed footer headings in
+  `doc_justice_tenancy_208507553.md` and
+  `doc_justice_tenancy_legacy_6129174.md`.
+* Added Tenancy LLM v2 story-shaped retrieval metadata:
+  `applicant_story`, `respondent_story`, `neutral_fact_pattern`, `claims_made`,
+  and `remedies_sought`. These fields are written to frontmatter and embedded
+  only as separate `generated=true` retrieval views.
+* Removed the Tenancy LLM `--llm-max-chars` option, all production `max_chars`
+  call paths, and the `excerpt` request field. LLM requests now send the full
+  parsed markdown body as `document_text`.
 
 ## Verification
 
@@ -718,16 +738,15 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Launch and monitor paid OpenRouter `deepseek/deepseek-v4-flash` production
-   Tenancy enrichment with `--llm-rpm 60`, `--llm-concurrency 30`,
-   `--llm-api-mode chat`, `--llm-chat-response-format json_schema`, and
-   `--llm-provider-ignore deepinfra`.
-2. Watch the first production hour for parse failures, HTTP 429s, long-tail
-   stalls, and effective request start rate before assuming the full backlog is
-   stable.
-3. Resume the direct MiniMax enrichment run only if OpenRouter DeepSeek does not
-   beat its reliability. The corpus currently has 34,914 pending markdown files,
-   which is a no-retry floor of about 9.7 hours at 60 RPM.
+1. Add a tested LLM input cleaner that removes only approved boilerplate, using
+   the exact `## Please read carefully:` boundary already applied to markdown
+   bodies and explicitly preserving all decision text before that boundary.
+2. Reset or supersede all `tenancy-llm-v1` generated metadata under a new
+   enrichment version before trusting LLM summaries, catchwords, questions, or
+   legal principles.
+3. Only after those fixes, run a copied-file canary for paid OpenRouter
+   `deepseek/deepseek-v4-flash` and inspect the actual request payload before
+   restarting production enrichment.
 4. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
    at 15+ scheduled RPM. If it is still worth using, first test a lower
    scheduled rate with an explicit in-flight cap, then implement provider-level

@@ -493,6 +493,26 @@ def generated_retrieval_texts(metadata: dict[str, object]) -> list[tuple[str, st
     if questions:
         views.append(("questions_answered", "\n".join(questions)))
 
+    applicant_story = clean_text(metadata.get("applicant_story"))
+    if applicant_story:
+        views.append(("applicant_story", applicant_story))
+
+    respondent_story = clean_text(metadata.get("respondent_story"))
+    if respondent_story:
+        views.append(("respondent_story", respondent_story))
+
+    neutral_fact_pattern = clean_text(metadata.get("neutral_fact_pattern"))
+    if neutral_fact_pattern:
+        views.append(("neutral_fact_pattern", neutral_fact_pattern))
+
+    claims = list_value(metadata.get("claims_made"))
+    if claims:
+        views.append(("claims_made", "\n".join(claims)))
+
+    remedies = list_value(metadata.get("remedies_sought"))
+    if remedies:
+        views.append(("remedies_sought", "\n".join(remedies)))
+
     principles = format_legal_principles(metadata.get("legal_principles"))
     if principles:
         views.append(("legal_principles", principles))

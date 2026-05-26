@@ -28,7 +28,6 @@ DEFAULT_MODELS = [
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_MARKDOWN_DIR = Path("storage/justice/tenancy/markdown_docling")
 DEFAULT_REQUESTS_PER_MODEL = 100
-DEFAULT_MAX_CHARS = 5000
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TIMEOUT = 240
 
@@ -41,7 +40,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-key-env", default="NVIDIA_API_KEY")
     parser.add_argument("--markdown-dir", type=Path, default=DEFAULT_MARKDOWN_DIR)
     parser.add_argument("--requests-per-model", type=int, default=DEFAULT_REQUESTS_PER_MODEL)
-    parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     parser.add_argument("--cooldown-seconds", type=float, default=60)
@@ -254,13 +252,12 @@ def main() -> None:
         raise SystemExit(
             f"Only found {len(paths)} usable markdown files, need {args.requests_per_model}"
         )
-    documents = [build_llm_input([path], args.max_chars)[0] for path in paths]
+    documents = [build_llm_input([path])[0] for path in paths]
     client = OpenAI(base_url=args.base_url, api_key=api_key, timeout=args.timeout)
     all_results: list[dict[str, Any]] = []
     run_summary: dict[str, Any] = {
         "base_url": args.base_url,
         "requests_per_model": args.requests_per_model,
-        "max_chars": args.max_chars,
         "max_tokens": args.max_tokens,
         "models": {},
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),

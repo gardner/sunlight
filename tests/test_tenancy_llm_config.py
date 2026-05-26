@@ -27,6 +27,7 @@ class TenancyLlmConfigTests(unittest.TestCase):
         self.assertEqual(args.llm_base_url, "https://api.minimax.io/v1")
         self.assertEqual(args.llm_model, "MiniMax-M2.7-highspeed")
         self.assertEqual(args.llm_rpm, 12)
+        self.assertFalse(hasattr(args, "llm_max_chars"))
         self.assertEqual(args.llm_instructor_mode, "json_schema")
 
     def test_minimax_api_key_is_loaded_from_dotenv(self):

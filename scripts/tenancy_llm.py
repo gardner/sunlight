@@ -22,11 +22,11 @@ from tenancy_instructor import (
     instructor_client,
 )
 from tenancy_llm_messages import build_enrichment_messages
-from tenancy_llm_request import ChatRequestOptions, chat_completion_kwargs
+from tenancy_llm_request import ChatRequestOptions, chat_completion_kwargs, llm_error_summary
 from tenancy_rate_limit import RequestRateLimiter
 
 
-LLM_ENRICHMENT_VERSION = "tenancy-llm-v1"
+LLM_ENRICHMENT_VERSION = "tenancy-llm-v2"
 LLM_PROMPT_TOKEN_MARGIN = 1024
 LLM_BATCH_BUILD_PROGRESS_INTERVAL = 1000
 LLM_API_MODE_CHAT = "chat"
@@ -39,12 +39,16 @@ class LegalPrinciple(BaseModel):
     confidence: str = "medium"
     source_section: str = ""
 
-
 class GeneratedEnrichment(BaseModel):
     document_id: str
     case_summary: str = ""
     catchwords: list[str] = Field(default_factory=list)
     questions_answered: list[str] = Field(default_factory=list)
+    applicant_story: str = ""
+    respondent_story: str = ""
+    neutral_fact_pattern: str = ""
+    claims_made: list[str] = Field(default_factory=list)
+    remedies_sought: list[str] = Field(default_factory=list)
     legal_principles: list[LegalPrinciple] = Field(default_factory=list)
     llm_suggested_tags: list[str] = Field(default_factory=list)
 
@@ -52,12 +56,18 @@ class GeneratedEnrichment(BaseModel):
 class GeneratedEnrichmentBatch(BaseModel):
     items: list[GeneratedEnrichment]
 
-
 @dataclass(frozen=True)
 class LlmBatch:
     markdown_paths: list[Path]
     documents: list[dict[str, object]]
     prompt_tokens: int
+
+
+GENERATED_ENRICHMENT_FIELDS = (
+    "case_summary", "catchwords", "questions_answered",
+    "applicant_story", "respondent_story", "neutral_fact_pattern",
+    "claims_made", "remedies_sought", "legal_principles", "llm_suggested_tags",
+)
 
 
 def utc_now_iso() -> str:
@@ -100,13 +110,9 @@ def apply_generated_enrichment(
 ) -> None:
     metadata, body = parse_tenancy_markdown(markdown_path.read_text(encoding="utf-8"))
     merged = dict(metadata)
-    for key in (
-        "case_summary",
-        "catchwords",
-        "questions_answered",
-        "legal_principles",
-        "llm_suggested_tags",
-    ):
+    for key in GENERATED_ENRICHMENT_FIELDS:
+        merged.pop(key, None)
+    for key in GENERATED_ENRICHMENT_FIELDS:
         value = enrichment.get(key)
         if value not in (None, "", [], {}):
             merged[key] = normalize_generated_value(value)
@@ -126,7 +132,7 @@ def normalize_generated_value(value: object) -> object:
     return value
 
 
-def build_llm_input(markdown_paths: list[Path], max_chars: int) -> list[dict[str, object]]:
+def build_llm_input(markdown_paths: list[Path]) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
     for path in markdown_paths:
         metadata, body = parse_tenancy_markdown(path.read_text(encoding="utf-8"))
@@ -137,7 +143,7 @@ def build_llm_input(markdown_paths: list[Path], max_chars: int) -> list[dict[str
                 "decision_date": metadata.get("decision_date"),
                 "legal_issue_tags": metadata.get("legal_issue_tags"),
                 "statute_sections": metadata.get("statute_sections"),
-                "excerpt": body.strip()[:max_chars],
+                "document_text": body.strip(),
             }
         )
     return items
@@ -155,7 +161,6 @@ def load_qwen_tokenizer(model: str):
 def build_llm_batches(
     markdown_paths: list[Path],
     *,
-    max_chars: int,
     tokenizer,
     prompt_token_budget: int,
     max_batch_size: int,
@@ -172,7 +177,7 @@ def build_llm_batches(
     document_separator_tokens = len(tokenizer.encode(", "))
 
     for index, path in enumerate(markdown_paths, start=1):
-        [document] = build_llm_input([path], max_chars)
+        [document] = build_llm_input([path])
         document_tokens = estimate_llm_document_tokens(document, tokenizer)
         candidate_tokens = estimate_llm_batch_prompt_tokens_from_parts(
             base_prompt_tokens,
@@ -319,7 +324,6 @@ def enrich_with_llm(
     rpm: int,
     batch_size: int,
     concurrency: int,
-    max_chars: int,
     timeout: int,
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
@@ -342,7 +346,6 @@ def enrich_with_llm(
     )
     batches = build_llm_batches(
         markdown_paths,
-        max_chars=max_chars,
         tokenizer=tokenizer,
         prompt_token_budget=effective_prompt_budget,
         max_batch_size=batch_size,
@@ -470,6 +473,11 @@ def request_batch_with_rate_limit(
             )
         except Exception as exc:
             last_error = exc
+            print(
+                f"LLM request attempt failed: attempt={attempt}/{attempts} "
+                f"{llm_error_summary(exc)}",
+                flush=True,
+            )
             if attempt == attempts:
                 break
             sleep(min(2**attempt, 10))
@@ -489,6 +497,7 @@ def apply_batch_enrichment(
         metadata, _ = parse_tenancy_markdown(path.read_text(encoding="utf-8"))
         item = by_id.get(str(metadata["document_id"]))
         if item is None:
+            print(f"LLM enrichment missing item for {metadata['document_id']}: returned_ids={list(by_id)}", flush=True)
             counts["failed"] += 1
             continue
         apply_generated_enrichment(
@@ -504,14 +513,13 @@ def request_generated_enrichment(
     client,
     markdown_paths: list[Path],
     model: str,
-    max_chars: int,
     max_tokens: int,
     api_mode: str = LLM_API_MODE_CHAT,
     instructor_mode: str = DEFAULT_INSTRUCTOR_MODE,
     chat_options: ChatRequestOptions | None = None,
 ) -> GeneratedEnrichmentBatch:
     return request_generated_enrichment_for_documents(
-        client, build_llm_input(markdown_paths, max_chars), model, max_tokens,
+        client, build_llm_input(markdown_paths), model, max_tokens,
         api_mode=api_mode, instructor_mode=instructor_mode, chat_options=chat_options,
     )
 
@@ -557,6 +565,8 @@ def request_generated_enrichment_for_documents(
         )
     )
     content = response.choices[0].message.content or ""
+    if not content.strip():
+        raise ValueError(f"LLM enrichment response content was empty; finish_reason={response.choices[0].finish_reason}")
     default_document_id = str(documents[0]["document_id"]) if len(documents) == 1 else None
     return parse_enrichment_content(content, default_document_id=default_document_id)
 
@@ -592,7 +602,6 @@ def request_generated_enrichment_with_retries(
     client,
     markdown_paths: list[Path],
     model: str,
-    max_chars: int,
     max_tokens: int,
     *,
     api_mode: str = LLM_API_MODE_CHAT,
@@ -603,7 +612,7 @@ def request_generated_enrichment_with_retries(
     for attempt in range(1, attempts + 1):
         try:
             return request_generated_enrichment(
-                client, markdown_paths, model, max_chars, max_tokens,
+                client, markdown_paths, model, max_tokens,
                 api_mode=api_mode, instructor_mode=instructor_mode,
             )
         except Exception as exc:

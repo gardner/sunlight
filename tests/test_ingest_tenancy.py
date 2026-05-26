@@ -155,44 +155,6 @@ class IngestTenancyTests(unittest.TestCase):
 
         self.assertEqual(paths, [ready])
 
-    def test_apply_generated_enrichment_rewrites_frontmatter_and_preserves_body(self):
-        module = load_module()
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            markdown_path = Path(tmp_dir) / "doc.md"
-            markdown_path.write_text(
-                f'---\ndocument_id: "doc_justice_tenancy_1"\nsource: "justice_tenancy"\nparser: "docling"\npipeline_version: "{module.PIPELINE_VERSION}"\nlegal_issue_tags: ["rent_arrears"]\n---\n\nOriginal body.',
-                encoding="utf-8",
-            )
-
-            module.apply_generated_enrichment(
-                markdown_path,
-                {
-                    "case_summary": "The landlord obtained a rent arrears order.",
-                    "catchwords": ["Rent arrears"],
-                    "questions_answered": ["What did the Tribunal order?"],
-                    "legal_principles": [
-                        {
-                            "principle": "Rent arrears can justify an order for payment.",
-                            "confidence": "medium",
-                            "source_section": "reasons",
-                        }
-                    ],
-                },
-                model="nvidia/regular",
-                now="2026-05-20T00:00:00Z",
-            )
-
-            metadata, body = module.parse_tenancy_markdown(
-                markdown_path.read_text(encoding="utf-8")
-            )
-
-        self.assertEqual(body, "Original body.")
-        self.assertEqual(metadata["legal_issue_tags"], ["rent_arrears"])
-        self.assertEqual(metadata["case_summary"], "The landlord obtained a rent arrears order.")
-        self.assertEqual(metadata["llm_enrichment_model"], "nvidia/regular")
-        self.assertEqual(metadata["llm_enrichment_version"], module.LLM_ENRICHMENT_VERSION)
-        self.assertEqual(metadata["llm_enriched_at"], "2026-05-20T00:00:00Z")
-
     def test_pending_llm_paths_require_current_docling_pipeline(self):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -219,7 +181,7 @@ class IngestTenancyTests(unittest.TestCase):
         self.assertEqual(paths, [ready])
         self.assertEqual(forced, [complete, ready])
 
-    def test_build_llm_input_limits_excerpt_and_preserves_ids(self):
+    def test_build_llm_input_uses_full_body(self):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp_dir:
             markdown_path = Path(tmp_dir) / "doc.md"
@@ -228,12 +190,12 @@ class IngestTenancyTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            [item] = module.build_llm_input([markdown_path], max_chars=3)
+            [item] = module.build_llm_input([markdown_path])
 
         self.assertEqual(item["document_id"], "doc_justice_tenancy_1")
         self.assertEqual(item["title"], "Title")
         self.assertEqual(item["legal_issue_tags"], ["rent_arrears"])
-        self.assertEqual(item["excerpt"], "abc")
+        self.assertEqual(item["document_text"], "abcdef")
 
     def test_build_llm_batches_fills_token_budget_without_exceeding_it(self):
         module = load_module()
@@ -258,10 +220,9 @@ class IngestTenancyTests(unittest.TestCase):
 
             batches = module.build_llm_batches(
                 paths,
-                max_chars=20,
                 tokenizer=FakeTokenizer(),
                 prompt_token_budget=module.estimate_llm_batch_prompt_tokens(
-                    module.build_llm_input(paths[:2], max_chars=20),
+                    module.build_llm_input(paths[:2]),
                     FakeTokenizer(),
                 ),
                 max_batch_size=10,
@@ -294,7 +255,6 @@ class IngestTenancyTests(unittest.TestCase):
 
             batches = module.build_llm_batches(
                 paths,
-                max_chars=20,
                 tokenizer=FakeTokenizer(),
                 prompt_token_budget=100_000,
                 max_batch_size=2,
@@ -330,7 +290,6 @@ class IngestTenancyTests(unittest.TestCase):
             tokenizer = CountingTokenizer()
             batches = module.build_llm_batches(
                 paths,
-                max_chars=200,
                 tokenizer=tokenizer,
                 prompt_token_budget=1_000_000,
                 max_batch_size=100,
@@ -361,7 +320,7 @@ class IngestTenancyTests(unittest.TestCase):
         tenancy_llm.request_generated_enrichment = flaky
         try:
             result = module.request_generated_enrichment_with_retries(
-                object(), [], "nvidia/regular", 5000, 4096
+                object(), [], "nvidia/regular", 4096
             )
         finally:
             tenancy_llm.request_generated_enrichment = original
@@ -386,7 +345,7 @@ class IngestTenancyTests(unittest.TestCase):
 
         module.request_generated_enrichment_for_documents(
             FakeClient(),
-            [{"document_id": "doc_justice_tenancy_1", "excerpt": "body"}],
+            [{"document_id": "doc_justice_tenancy_1", "document_text": "body"}],
             "Qwen/Qwen3.6-27B-FP8",
             16384,
         )
@@ -419,7 +378,7 @@ class IngestTenancyTests(unittest.TestCase):
 
         result = module.request_generated_enrichment_for_documents(
             client,
-            [{"document_id": "doc_justice_tenancy_1", "excerpt": "body"}],
+            [{"document_id": "doc_justice_tenancy_1", "document_text": "body"}],
             "nvidia/regular",
             max_tokens=4096,
             api_mode="responses",
@@ -446,7 +405,7 @@ class IngestTenancyTests(unittest.TestCase):
 
         result = module.request_generated_enrichment_for_documents(
             client,
-            [{"document_id": "doc_justice_tenancy_1", "excerpt": "body"}],
+            [{"document_id": "doc_justice_tenancy_1", "document_text": "body"}],
             "deepseek-ai/deepseek-v4-pro",
             max_tokens=4096,
             api_mode="instructor",
