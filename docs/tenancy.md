@@ -117,6 +117,27 @@ This is important because some documents may be partially suppressed, inconsiste
 
 ---
 
+### 2a. PII span audit
+
+Use `scripts/scan_pii_gliner.py` for an output-only pass with
+`nvidia/gliner-PII` when we want model-assisted review of residual identifiers.
+The scanner reads parsed markdown, scans the body by default, preserves absolute
+body offsets for each span, and writes JSONL plus optional aggregate summary
+JSON. It does not rewrite source markdown.
+
+```bash
+uv run python scripts/scan_pii_gliner.py \
+  --markdown-dir storage/justice/tenancy/markdown_docling \
+  --limit 25 \
+  --output-jsonl /tmp/tenancy-pii-gliner.jsonl \
+  --summary-json /tmp/tenancy-pii-gliner-summary.json
+```
+
+Review the sampled spans and false positives before running the full corpus or
+using the results as part of a publication workflow.
+
+---
+
 ### 3. Claim / application classification
 
 Classify what the parties were asking for.

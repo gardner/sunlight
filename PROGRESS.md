@@ -519,6 +519,11 @@ Completed:
 * Removed the Tenancy LLM `--llm-max-chars` option, all production `max_chars`
   call paths, and the `excerpt` request field. LLM requests now send the full
   parsed markdown body as `document_text`.
+* Added `gliner` and a tested output-only NVIDIA GLiNER PII scanner for
+  markdown bodies. The scanner emits span-level JSONL and aggregate summary JSON,
+  keeps source markdown untouched, chunks text under a conservative word budget
+  to avoid GLiNER internal truncation, and supports explicit frontmatter audits
+  with `--include-frontmatter`.
 
 ## Verification
 
@@ -695,6 +700,14 @@ uv run python -m unittest discover -s tests
 uv run ruff check scripts/ingest_tenancy.py scripts/tenancy_llm.py scripts/tenancy_instructor.py scripts/tenancy_llm_messages.py scripts/tenancy_rate_limit.py tests/test_ingest_tenancy.py
 uv run pre-commit run --files scripts/tenancy_llm.py tests/test_ingest_tenancy.py
 TENANCY_LLM_API_KEY="$NVIDIA_API_KEY" uv run python scripts/ingest_tenancy.py --skip-convert --skip-embed --limit 5 --llm-timeout 600 --llm-rpm 5 --llm-concurrency 1 --llm-start-jitter-min 0 --llm-start-jitter-max 0
+uv run python -m unittest tests/test_scan_pii_gliner.py
+uv run ruff check scripts/scan_pii_gliner.py tests/test_scan_pii_gliner.py
+uv run python scripts/scan_pii_gliner.py --help
+uv run python - <<'PY'
+from gliner import GLiNER
+print(GLiNER.__name__)
+PY
+uv run python scripts/scan_pii_gliner.py --markdown-dir storage/justice/tenancy/markdown_docling --limit 1 --labels person,address,email,phone_number --threshold 0.3 --output-jsonl /tmp/tenancy-pii-gliner-smoke.jsonl --summary-json /tmp/tenancy-pii-gliner-smoke-summary.json
 ```
 
 ## Notes
@@ -738,15 +751,15 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Add a tested LLM input cleaner that removes only approved boilerplate, using
-   the exact `## Please read carefully:` boundary already applied to markdown
-   bodies and explicitly preserving all decision text before that boundary.
-2. Reset or supersede all `tenancy-llm-v1` generated metadata under a new
-   enrichment version before trusting LLM summaries, catchwords, questions, or
-   legal principles.
-3. Only after those fixes, run a copied-file canary for paid OpenRouter
-   `deepseek/deepseek-v4-flash` and inspect the actual request payload before
-   restarting production enrichment.
+1. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
+   `tenancy-llm-v2` refresh completes, watching persisted failures and
+   Instructor retry volume.
+2. Run a 25-document GLiNER PII canary over Tenancy markdown, inspect span
+   quality and false positives, then tune labels/threshold before any full
+   corpus audit.
+3. If the canary is useful, run the full GLiNER JSONL audit and summarize
+   documents that need human redaction review before using results in a
+   publication workflow.
 4. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
    at 15+ scheduled RPM. If it is still worth using, first test a lower
    scheduled rate with an explicit in-flight cap, then implement provider-level

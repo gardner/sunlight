@@ -9,6 +9,7 @@ dependencies = [
     "curl-cffi>=0.15.0",
     "dnspython>=2.8.0",
     "docling>=2.93.0",
+    "gliner>=0.2.24",
     "huggingface-hub>=1.14.0",
     "instructor>=1.15.1",
     "lancedb>=0.30.2",

@@ -342,6 +342,29 @@ a deliberate privacy/product decision. Keep them in the source text and sidecar
 provenance, but prefer city/suburb, outcome, year, statute section, and tribunal
 fields for public filtering.
 
+### GLiNER PII Scan
+
+`scripts/scan_pii_gliner.py` adds a separate audit path for
+`nvidia/gliner-PII`. It scans parsed markdown bodies by default, emits span-level
+JSONL records, and does not mutate source markdown. Use `--include-frontmatter`
+only when auditing metadata fields as well as the decision text.
+
+Example canary:
+
+```bash
+uv run python scripts/scan_pii_gliner.py \
+  --markdown-dir storage/justice/tenancy/markdown_docling \
+  --limit 25 \
+  --output-jsonl /tmp/tenancy-pii-gliner.jsonl \
+  --summary-json /tmp/tenancy-pii-gliner-summary.json
+```
+
+Treat model output as review evidence. The default labels focus on direct
+identifiers such as people, addresses, emails, phone numbers, usernames, ID
+numbers, licences, passports, and financial account numbers. Tune labels and
+thresholds against real Tenancy samples before using the results for publication
+workflow decisions.
+
 ## Tenancy Enrichment Schema
 
 The high-value Tenancy-specific enrichment set is:
