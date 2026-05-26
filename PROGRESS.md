@@ -521,9 +521,15 @@ Completed:
   parsed markdown body as `document_text`.
 * Added `gliner` and a tested output-only NVIDIA GLiNER PII scanner for
   markdown bodies. The scanner emits span-level JSONL and aggregate summary JSON,
-  keeps source markdown untouched, chunks text under a conservative word budget
+  keeps source markdown untouched, chunks text under a conservative GLiNER token budget
   to avoid GLiNER internal truncation, and supports explicit frontmatter audits
   with `--include-frontmatter`.
+* Ran the 25-document Tenancy GLiNER canary with the token-capped scanner. The
+  valid artifact is `logs/tenancy-pii-gliner-canary-25-token300.jsonl` with
+  summary `logs/tenancy-pii-gliner-canary-25-token300-summary.json`: 25/25
+  documents scanned, 0 failures, 436 spans, and all 25 documents had at least
+  one detected span. Label counts were 357 `person`, 38 `national_id`, 35
+  `address`, 3 `bank_account`, 2 `phone_number`, and 1 `credit_card`.
 
 ## Verification
 
@@ -708,6 +714,7 @@ from gliner import GLiNER
 print(GLiNER.__name__)
 PY
 uv run python scripts/scan_pii_gliner.py --markdown-dir storage/justice/tenancy/markdown_docling --limit 1 --labels person,address,email,phone_number --threshold 0.3 --output-jsonl /tmp/tenancy-pii-gliner-smoke.jsonl --summary-json /tmp/tenancy-pii-gliner-smoke-summary.json
+uv run python scripts/scan_pii_gliner.py --markdown-dir storage/justice/tenancy/markdown_docling --limit 25 --labels person,address,email,phone_number,national_id,driver_license,passport_number,bank_account,credit_card --threshold 0.3 --output-jsonl logs/tenancy-pii-gliner-canary-25-token300.jsonl --summary-json logs/tenancy-pii-gliner-canary-25-token300-summary.json
 ```
 
 ## Notes
@@ -754,60 +761,62 @@ Important naming boundary:
 1. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
    `tenancy-llm-v2` refresh completes, watching persisted failures and
    Instructor retry volume.
-2. Run a 25-document GLiNER PII canary over Tenancy markdown, inspect span
-   quality and false positives, then tune labels/threshold before any full
-   corpus audit.
-3. If the canary is useful, run the full GLiNER JSONL audit and summarize
+2. Review the 25-document GLiNER canary spans for useful signal versus expected
+   noise: party names and street addresses look useful, while role words,
+   adjudicator names, application numbers, NZTT citations, and occasional OCR
+   fragments need filtering or downstream interpretation.
+3. Tune GLiNER labels/thresholds and post-filters before any full corpus audit.
+4. If the tuned canary is useful, run the full GLiNER JSONL audit and summarize
    documents that need human redaction review before using results in a
    publication workflow.
-4. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
+5. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
    at 15+ scheduled RPM. If it is still worth using, first test a lower
    scheduled rate with an explicit in-flight cap, then implement provider-level
    caps before alternating providers.
-5. If `json_schema` proves unstable with `MiniMax-M2.7-highspeed`, retry with
+6. If `json_schema` proves unstable with `MiniMax-M2.7-highspeed`, retry with
    `json_mode` before falling back to `md_json`, since `md_json` has the
    broadest compatibility but the weakest speed and accuracy profile.
-6. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
+7. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-7. Resume Tenancy embedding for the converted legacy markdown with
+8. Resume Tenancy embedding for the converted legacy markdown with
    `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
    updated LanceDB row counts.
-8. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
+9. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.
-9. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
+10. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
    existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
-10. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
+11. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
    enabling Tenancy in public search.
-11. Update the landing search API and UI for multi-source citations, labels, and
+12. Update the landing search API and UI for multi-source citations, labels, and
    source filters.
-12. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
-13. Choose the Hugging Face dataset repo id, visibility, and license wording,
+13. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
+14. Choose the Hugging Face dataset repo id, visibility, and license wording,
    then publish with the exporter upload command.
-14. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+15. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
    stays living; use full snapshots by default and delta exports when append-only
    updates are useful.
-15. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+16. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-16. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+17. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-17. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+18. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-18. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+19. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-19. Continue expanding the reviewed eval manifest, especially with more
+20. Continue expanding the reviewed eval manifest, especially with more
    numeric/table-heavy FYI records and additional production failures once
    search logs expose them.
-20. Add optional local vLLM answer generation and answer-grounding checks to the
+21. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-21. Add exact query response caching for `/api/search` to reduce repeated answer
+22. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-22. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+23. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-23. Do a controlled live Cloudflare Email Sending test before sending to real
+24. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-24. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+25. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.

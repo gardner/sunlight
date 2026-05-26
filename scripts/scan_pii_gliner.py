@@ -25,6 +25,7 @@ DEFAULT_LABELS = (
     "bank_account",
     "credit_card",
 )
+GLINER_TOKEN_RE = re.compile(r"\w+(?:[-_]\w+)*|\S")
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ def chunk_text(
     text: str,
     chunk_chars: int,
     chunk_overlap: int,
-    chunk_words: int = 100,
+    chunk_tokens: int = 300,
 ) -> list[TextChunk]:
     if chunk_chars <= 0:
         raise ValueError("chunk_chars must be greater than 0")
@@ -55,8 +56,8 @@ def chunk_text(
         raise ValueError("chunk_overlap must be 0 or greater")
     if chunk_overlap >= chunk_chars:
         raise ValueError("chunk_overlap must be smaller than chunk_chars")
-    if chunk_words <= 0:
-        raise ValueError("chunk_words must be greater than 0")
+    if chunk_tokens <= 0:
+        raise ValueError("chunk_tokens must be greater than 0")
     if not text:
         return []
 
@@ -64,7 +65,7 @@ def chunk_text(
     start = 0
     while start < len(text):
         char_end = min(len(text), start + chunk_chars)
-        end = end_for_word_budget(text, start, char_end, chunk_words)
+        end = end_for_token_budget(text, start, char_end, chunk_tokens)
         chunks.append(TextChunk(start=start, end=end, text=text[start:end]))
         if end == len(text):
             break
@@ -72,11 +73,11 @@ def chunk_text(
     return chunks
 
 
-def end_for_word_budget(text: str, start: int, char_end: int, chunk_words: int) -> int:
-    word_count = 0
-    for match in re.finditer(r"\S+", text[start:char_end]):
-        word_count += 1
-        if word_count >= chunk_words:
+def end_for_token_budget(text: str, start: int, char_end: int, chunk_tokens: int) -> int:
+    token_count = 0
+    for match in GLINER_TOKEN_RE.finditer(text[start:char_end]):
+        token_count += 1
+        if token_count >= chunk_tokens:
             return start + match.end()
     return char_end
 
@@ -145,14 +146,14 @@ def scan_text(
     threshold: float,
     chunk_chars: int,
     chunk_overlap: int,
-    chunk_words: int = 100,
+    chunk_tokens: int = 300,
 ) -> list[PiiEntity]:
     entities: list[PiiEntity] = []
     for chunk in chunk_text(
         text,
         chunk_chars=chunk_chars,
         chunk_overlap=chunk_overlap,
-        chunk_words=chunk_words,
+        chunk_tokens=chunk_tokens,
     ):
         predictions = model.predict_entities(chunk.text, labels, threshold=threshold)
         for prediction in predictions:
@@ -188,7 +189,7 @@ def scan_markdown_path(
     threshold: float,
     chunk_chars: int,
     chunk_overlap: int,
-    chunk_words: int = 100,
+    chunk_tokens: int = 300,
     include_frontmatter: bool = False,
     include_redacted_text: bool = False,
 ) -> dict[str, Any]:
@@ -202,7 +203,7 @@ def scan_markdown_path(
         threshold=threshold,
         chunk_chars=chunk_chars,
         chunk_overlap=chunk_overlap,
-        chunk_words=chunk_words,
+        chunk_tokens=chunk_tokens,
     )
 
     record: dict[str, Any] = {
@@ -282,7 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--chunk-chars", type=int, default=3000)
     parser.add_argument("--chunk-overlap", type=int, default=200)
-    parser.add_argument("--chunk-words", type=int, default=100)
+    parser.add_argument("--chunk-tokens", type=int, default=300)
     parser.add_argument("--include-frontmatter", action="store_true")
     parser.add_argument("--include-redacted-text", action="store_true")
     return parser
@@ -316,7 +317,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     threshold=args.threshold,
                     chunk_chars=args.chunk_chars,
                     chunk_overlap=args.chunk_overlap,
-                    chunk_words=args.chunk_words,
+                    chunk_tokens=args.chunk_tokens,
                     include_frontmatter=args.include_frontmatter,
                     include_redacted_text=args.include_redacted_text,
                 )

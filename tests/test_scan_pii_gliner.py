@@ -70,17 +70,17 @@ class ScanPiiGlinerTests(unittest.TestCase):
 
         self.assertEqual(labels, ["email", "phone_number", "person"])
 
-    def test_chunk_text_honors_word_budget(self):
+    def test_chunk_text_honors_gliner_token_budget(self):
         module = load_module()
 
         chunks = module.chunk_text(
-            "one two three four five six",
+            "one, two, three, four",
             chunk_chars=100,
             chunk_overlap=0,
-            chunk_words=3,
+            chunk_tokens=4,
         )
 
-        self.assertEqual([chunk.text for chunk in chunks], ["one two three", " four five six"])
+        self.assertEqual([chunk.text for chunk in chunks], ["one, two,", " three, four"])
 
     def test_scan_text_converts_chunk_offsets_to_document_offsets(self):
         module = load_module()
