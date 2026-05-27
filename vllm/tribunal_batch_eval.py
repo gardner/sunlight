@@ -12,6 +12,7 @@ if __package__ in {None, ""}:
 
 from vllm import tribunal_eval_extract as extract
 from vllm import tribunal_eval_runner as runner
+from vllm import tribunal_eval_schema as schema
 
 CaseRecord = runner.CaseRecord
 build_payload = runner.build_payload
@@ -19,7 +20,9 @@ compact_case_manifest = runner.compact_case_manifest
 discover_cases = runner.discover_cases
 parse_predictions = runner.parse_predictions
 post_json = runner.post_json
+reserved_case_tokens = runner.reserved_case_tokens
 run_eval = runner.run_eval
+select_cases = runner.select_cases
 score_predictions = runner.score_predictions
 strip_front_matter = extract.strip_front_matter
 extract_gold_case_data = extract.extract_gold_case_data
@@ -27,6 +30,7 @@ extract_teacher_case_data = extract.extract_teacher_case_data
 extract_citation = extract.extract_citation
 normalize_party_value = extract.normalize_party_value
 normalize_string = extract.normalize_string
+validate_response_schema_object = schema.validate_response_schema_object
 values_match = extract.values_match
 
 

@@ -29,6 +29,7 @@ from vllm.tribunal_eval_extract import (
     strip_front_matter,
     values_match,
 )
+from vllm.tribunal_eval_schema import validate_response_schema_object
 
 DEFAULT_MARKDOWN_DIR = Path("storage/justice/tenancy/markdown_docling")
 DEFAULT_SIDECAR_DIR = Path("justice/data/tenancy/pdfs")
@@ -58,13 +59,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--case-count", type=int, default=48)
-    parser.add_argument("--target-prompt-tokens", type=int, default=None)
+    parser.add_argument("--target-batch-tokens", type=int, default=None)
+    parser.add_argument("--target-prompt-tokens", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--max-tokens", type=int, default=320)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     parser.add_argument("--enable-thinking", action="store_true")
+    parser.add_argument("--thinking-token-budget", type=int, default=None)
     parser.add_argument("--no-balanced-redactions", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -137,17 +140,19 @@ def order_candidates(candidates: list[CaseRecord], seed: int, balanced_redaction
 def select_cases(
     ordered: list[CaseRecord],
     case_count: int,
-    target_prompt_tokens: int | None,
+    target_batch_tokens: int | None,
+    thinking_token_budget: int | None,
 ) -> list[CaseRecord]:
     selected: list[CaseRecord] = []
-    prompt_tokens = 0
+    batch_tokens = 0
     for case in ordered:
+        reserved_tokens = reserved_case_tokens(case, thinking_token_budget)
         if case_count and len(selected) >= case_count:
             break
-        if target_prompt_tokens and selected and prompt_tokens >= target_prompt_tokens:
+        if target_batch_tokens and selected and batch_tokens + reserved_tokens > target_batch_tokens:
             break
         selected.append(case)
-        prompt_tokens += case.approximate_tokens
+        batch_tokens += reserved_tokens
     return selected
 
 
@@ -155,17 +160,23 @@ def discover_cases(
     markdown_dir: Path,
     sidecar_dir: Path,
     case_count: int,
-    target_prompt_tokens: int | None,
+    target_batch_tokens: int | None,
     seed: int,
     balanced_redactions: bool,
+    thinking_token_budget: int | None,
 ) -> list[CaseRecord]:
     candidates = load_candidates(markdown_dir=markdown_dir, sidecar_dir=sidecar_dir)
     ordered = order_candidates(candidates=candidates, seed=seed, balanced_redactions=balanced_redactions)
     return select_cases(
         ordered=ordered,
         case_count=case_count,
-        target_prompt_tokens=target_prompt_tokens,
+        target_batch_tokens=target_batch_tokens,
+        thinking_token_budget=thinking_token_budget,
     )
+
+
+def reserved_case_tokens(case: CaseRecord, thinking_token_budget: int | None) -> int:
+    return case.approximate_tokens + max(0, thinking_token_budget or 0)
 
 
 def build_payload(
@@ -175,12 +186,13 @@ def build_payload(
     temperature: float,
     max_tokens: int,
     enable_thinking: bool,
+    thinking_token_budget: int | None,
 ) -> dict[str, Any]:
     messages = [
         [{"role": "user", "content": build_prompt_content(case.markdown_text)}]
         for case in cases
     ]
-    return {
+    payload = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
@@ -195,6 +207,9 @@ def build_payload(
             },
         },
     }
+    if thinking_token_budget is not None:
+        payload["thinking_token_budget"] = thinking_token_budget
+    return payload
 
 
 def post_json(url: str, payload: dict[str, Any], timeout_seconds: int) -> tuple[int, bytes, float]:
@@ -252,6 +267,60 @@ def round_score_value(value: Any) -> Any:
     return round(value, 4) if isinstance(value, float) else value
 
 
+def build_schema_totals() -> dict[str, Any]:
+    return {
+        "parse_success_cases": 0,
+        "schema_valid_cases": 0,
+        "parse_error_cases": 0,
+        "missing_prediction_cases": 0,
+        "error_counts": {
+            "missing_required": 0,
+            "type": 0,
+            "enum": 0,
+            "extra_property": 0,
+        },
+    }
+
+
+def summarize_schema_totals(schema_totals: dict[str, Any], cases: list[CaseRecord]) -> dict[str, Any]:
+    case_count = len(cases)
+    return {
+        "cases": case_count,
+        "json_parse_success_cases": schema_totals["parse_success_cases"],
+        "json_parse_success_rate": round(schema_totals["parse_success_cases"] / case_count, 4) if case_count else None,
+        "schema_valid_cases": schema_totals["schema_valid_cases"],
+        "schema_valid_rate": round(schema_totals["schema_valid_cases"] / case_count, 4) if case_count else None,
+        "parse_error_cases": schema_totals["parse_error_cases"],
+        "missing_prediction_cases": schema_totals["missing_prediction_cases"],
+        "error_counts": schema_totals["error_counts"],
+    }
+
+
+def validate_case_prediction(case: CaseRecord, predictions: dict[str, dict[str, Any]]) -> tuple[bool, list[str]]:
+    prediction = predictions.get(case.order_id)
+    if prediction is None:
+        return False, ["missing_prediction"]
+    if "_parse_error" in prediction:
+        return False, ["parse_error"]
+    return True, validate_response_schema_object(prediction)
+
+
+def update_schema_totals(schema_totals: dict[str, Any], schema_errors: list[str], parse_success: bool) -> None:
+    if parse_success:
+        schema_totals["parse_success_cases"] += 1
+    else:
+        if "missing_prediction" in schema_errors:
+            schema_totals["missing_prediction_cases"] += 1
+        else:
+            schema_totals["parse_error_cases"] += 1
+    if not schema_errors:
+        schema_totals["schema_valid_cases"] += 1
+    for error in schema_errors:
+        category = error.split(":", 1)[0]
+        if category in schema_totals["error_counts"]:
+            schema_totals["error_counts"][category] += 1
+
+
 def summarize_generated_fields(
     field_totals: dict[str, dict[str, Any]],
     total_scored: int,
@@ -292,6 +361,7 @@ def summarize_generated_fields(
 def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, Any]]) -> dict[str, Any]:
     field_totals = {field: {"correct": 0, "scored": 0} for field in SCHEMA_FIELDS}
     generated_totals = build_generated_field_totals()
+    schema_totals = build_schema_totals()
     case_results: list[dict[str, Any]] = []
     fully_correct_cases = 0
     generated_scored = 0
@@ -302,6 +372,8 @@ def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, 
     generated_f1_sum = 0.0
     for case in cases:
         predicted = predictions.get(case.order_id, {})
+        parse_success, schema_errors = validate_case_prediction(case, predictions)
+        update_schema_totals(schema_totals, schema_errors, parse_success)
         mismatched_fields: list[str] = []
         matched_fields = 0
         scored_fields = 0
@@ -349,6 +421,8 @@ def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, 
                 "matched_fields": matched_fields,
                 "scored_fields": scored_fields,
                 "mismatched_fields": mismatched_fields,
+                "schema_valid": not schema_errors,
+                "schema_errors": schema_errors,
                 "generated_field_scores": generated_field_scores,
             }
         )
@@ -367,6 +441,7 @@ def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, 
             "fully_correct_case_accuracy": round(fully_correct_cases / len(cases), 4) if cases else None,
         },
         "fields": field_summary,
+        "schema": summarize_schema_totals(schema_totals, cases),
         "generated_fields": summarize_generated_fields(
             field_totals=generated_totals,
             total_scored=generated_scored,
@@ -400,9 +475,10 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         markdown_dir=args.markdown_dir.resolve(),
         sidecar_dir=args.sidecar_dir.resolve(),
         case_count=args.case_count,
-        target_prompt_tokens=args.target_prompt_tokens,
+        target_batch_tokens=args.target_batch_tokens or args.target_prompt_tokens,
         seed=args.seed,
         balanced_redactions=not args.no_balanced_redactions,
+        thinking_token_budget=args.thinking_token_budget,
     )
     payload = build_payload(
         model=args.model,
@@ -410,6 +486,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         enable_thinking=args.enable_thinking,
+        thinking_token_budget=args.thinking_token_budget,
     )
     run_name = args.run_name or time.strftime("tribunal_batch_eval_%Y%m%d_%H%M%S", time.gmtime())
     output_dir = args.output_dir.resolve()
@@ -423,9 +500,14 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         "base_url": args.base_url,
         "model": args.model,
         "enable_thinking": args.enable_thinking,
+        "thinking_token_budget": args.thinking_token_budget,
         "case_count": len(cases),
         "redacted_cases": sum(1 for case in cases if case.redacted),
+        "target_batch_tokens": args.target_batch_tokens or args.target_prompt_tokens,
         "approximate_prompt_tokens": sum(case.approximate_tokens for case in cases),
+        "approximate_reserved_tokens": sum(
+            reserved_case_tokens(case, args.thinking_token_budget) for case in cases
+        ),
         "cases": compact_case_manifest(cases),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -438,7 +520,9 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
             "case_count": len(cases),
             "redacted_cases": manifest["redacted_cases"],
             "approximate_prompt_tokens": manifest["approximate_prompt_tokens"],
+            "approximate_reserved_tokens": manifest["approximate_reserved_tokens"],
             "enable_thinking": args.enable_thinking,
+            "thinking_token_budget": args.thinking_token_budget,
         }
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return summary
@@ -458,7 +542,9 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         "case_count": len(cases),
         "redacted_cases": manifest["redacted_cases"],
         "approximate_prompt_tokens": manifest["approximate_prompt_tokens"],
+        "approximate_reserved_tokens": manifest["approximate_reserved_tokens"],
         "enable_thinking": args.enable_thinking,
+        "thinking_token_budget": args.thinking_token_budget,
         "manifest_path": str(manifest_path),
         "payload_path": str(payload_path),
         "response_path": str(response_path),

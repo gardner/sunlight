@@ -298,6 +298,7 @@ The harness:
 - derives gold header/order fields from the markdown itself
 - reads MiniMax `tenancy-llm-v2` frontmatter as teacher labels for generated
   retrieval fields when present
+- applies local post-hoc JSON-schema validation to every parsed response
 - sends one JSON-schema extraction request per case through
   `/v1/chat/completions/batch`
 - writes manifest, payload, response, and scored summary files to `vllm/results`
@@ -311,6 +312,18 @@ Non-LLM generated-field eval:
   text, so wording changes are tolerated better than exact string matching.
 - These teacher metrics are currently preparatory for richer schemas. The
   header/order extraction schema does not yet ask vLLM to emit those fields.
+
+Schema validation and batch reserves:
+
+- The harness now reports local `json_parse_success` and `schema_valid` rates,
+  plus counts for missing required fields, type violations, enum violations,
+  and extra properties.
+- Saved 96-case runs `tribunal_big_96_v2`, `tribunal_big_96_think_2048`, and
+  `tribunal_big_96_think_4096` all re-scored at `96/96` parseable and
+  `96/96` schema-valid.
+- When `--target-batch-tokens` is used with thinking enabled, selection now
+  reserves `approximate_prompt_tokens + thinking_token_budget` per case rather
+  than packing batches by prompt length alone.
 
 Run the current balanced eval:
 

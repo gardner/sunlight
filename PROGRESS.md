@@ -797,6 +797,18 @@ Cloudflare resources:
   list and legal-principle fields, so future vLLM parameter sweeps can be
   graded without an LLM judge. A `--dry-run` over real cases confirmed the
   sampled records carried all nine teacher fields.
+* Added local post-hoc JSON-schema validation to the standalone tribunal eval
+  harness instead of trusting vLLM `strict: true` alone. Summaries now report
+  parse-success and schema-valid rates plus counts for missing required fields,
+  type violations, enum violations, and extra properties. Re-scoring the saved
+  `tribunal_big_96_v2`, `tribunal_big_96_think_2048`, and
+  `tribunal_big_96_think_4096` outputs showed all 96/96 responses in each run
+  were parseable and schema-valid, so the quality differences are extraction
+  errors rather than schema drift.
+* Changed tribunal batch sizing to reserve `prompt_tokens + thinking_budget`
+  per selected case when a target batch token budget is used, and surfaced
+  `approximate_reserved_tokens` in run summaries so thinking-enabled sweeps do
+  not over-pack batches on prompt length alone.
 
 Known issue:
 
@@ -819,12 +831,15 @@ Important naming boundary:
 1. Inspect the `tribunal_big_96_v2` misses by field and by document, especially
    tribunal-location normalization, placeholder-party naming, and ambiguous
    payable-direction cases.
-2. Expand the vLLM output schema to emit the MiniMax-style generated retrieval
+2. Make the tribunal harness context-aware per item by recording and checking
+   `prompt + max_tokens` against the chosen model limit, separately from the
+   scheduler-style batch reserve heuristic.
+3. Expand the vLLM output schema to emit the MiniMax-style generated retrieval
    fields so the new non-LLM teacher scorer can grade real predictions instead
    of just the structured header/order slice.
-3. Run a small generated-field sweep first on batch sizes `1` and `8`, then
-   compare structured exact-field accuracy and teacher-field overlap metrics
-   before scaling back up to the balanced 96-case run.
+4. Run a small generated-field sweep first on batch sizes `1` and `8`, then
+   compare structured exact-field accuracy, schema-valid rate, and teacher-field
+   overlap metrics before scaling back up to the balanced 96-case run.
 4. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
    `tenancy-llm-v2` refresh completes, watching persisted failures and
    Instructor retry volume.

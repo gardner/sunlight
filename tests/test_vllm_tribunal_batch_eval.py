@@ -227,11 +227,13 @@ class PayloadTests(unittest.TestCase):
             temperature=0.0,
             max_tokens=300,
             enable_thinking=True,
+            thinking_token_budget=4096,
         )
 
         self.assertEqual(payload["model"], "test-model")
         self.assertEqual(payload["temperature"], 0.0)
         self.assertEqual(payload["max_tokens"], 300)
+        self.assertEqual(payload["thinking_token_budget"], 4096)
         self.assertEqual(payload["chat_template_kwargs"], {"enable_thinking": True})
         self.assertEqual(len(payload["messages"]), 2)
         self.assertEqual(payload["messages"][0][0]["role"], "user")
@@ -241,6 +243,76 @@ class PayloadTests(unittest.TestCase):
             payload["response_format"]["json_schema"]["name"],
             "tribunal_extraction",
         )
+
+    def test_validate_schema_flags_missing_keys_enums_and_extra_properties(self) -> None:
+        errors = module.validate_response_schema_object(
+            {
+                "citation": "[2024] NZTT 4744510",
+                "application_number": "4744510",
+                "decision_date": "2024-01-18",
+                "tribunal_location": "Remote Location",
+                "adjudicator": "M Manhire",
+                "applicant_name": "A",
+                "applicant_role": "owner",
+                "respondent_name": "B",
+                "respondent_role": "tenant",
+                "tenancy_address": "Somewhere",
+                "has_name_redactions": False,
+                "total_award_nzd": 2450.44,
+                "payable_by": "tenant",
+                "payable_to": "landlord",
+                "extra_field": "unexpected",
+            }
+        )
+
+        self.assertIn("missing_required:has_address_redactions", errors)
+        self.assertIn("enum:applicant_role", errors)
+        self.assertIn("extra_property:extra_field", errors)
+
+    def test_select_cases_uses_prompt_plus_reasoning_budget(self) -> None:
+        cases = [
+            module.CaseRecord(
+                order_id="1",
+                markdown_path="a.md",
+                sidecar_path="a.json",
+                markdown_text="A",
+                sidecar={},
+                gold_fields={},
+                approximate_tokens=100,
+                redacted=False,
+            ),
+            module.CaseRecord(
+                order_id="2",
+                markdown_path="b.md",
+                sidecar_path="b.json",
+                markdown_text="B",
+                sidecar={},
+                gold_fields={},
+                approximate_tokens=150,
+                redacted=False,
+            ),
+            module.CaseRecord(
+                order_id="3",
+                markdown_path="c.md",
+                sidecar_path="c.json",
+                markdown_text="C",
+                sidecar={},
+                gold_fields={},
+                approximate_tokens=200,
+                redacted=False,
+            ),
+        ]
+
+        selected = module.select_cases(
+            ordered=cases,
+            case_count=10,
+            target_batch_tokens=1200,
+            thinking_token_budget=400,
+        )
+
+        self.assertEqual([case.order_id for case in selected], ["1", "2"])
+        self.assertEqual(module.reserved_case_tokens(cases[0], 400), 500)
+        self.assertEqual(module.reserved_case_tokens(cases[1], 400), 550)
 
 
 class ScoringTests(unittest.TestCase):
@@ -277,8 +349,12 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(summary["fields"]["decision_date"]["correct"], 1)
         self.assertEqual(summary["fields"]["total_award_nzd"]["correct"], 0)
         self.assertEqual(summary["fields"]["has_name_redactions"]["correct"], 1)
+        self.assertEqual(summary["schema"]["json_parse_success_cases"], 1)
+        self.assertEqual(summary["schema"]["schema_valid_cases"], 0)
+        self.assertEqual(summary["schema"]["error_counts"]["missing_required"], 11)
         self.assertEqual(summary["case_results"][0]["matched_fields"], 3)
         self.assertEqual(summary["case_results"][0]["mismatched_fields"], ["total_award_nzd"])
+        self.assertFalse(summary["case_results"][0]["schema_valid"])
 
     def test_score_predictions_reports_teacher_field_overlap_scores(self) -> None:
         case = module.CaseRecord(
