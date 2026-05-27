@@ -296,9 +296,21 @@ The harness:
 
 - pairs real cases by `order_id`
 - derives gold header/order fields from the markdown itself
+- reads MiniMax `tenancy-llm-v2` frontmatter as teacher labels for generated
+  retrieval fields when present
 - sends one JSON-schema extraction request per case through
   `/v1/chat/completions/batch`
 - writes manifest, payload, response, and scored summary files to `vllm/results`
+
+Non-LLM generated-field eval:
+
+- `case_summary`, `applicant_story`, `respondent_story`, and
+  `neutral_fact_pattern` use lexical token precision/recall/F1.
+- `catchwords`, `questions_answered`, `claims_made`, `remedies_sought`, and
+  `legal_principles` use greedy item-level precision/recall/F1 over normalized
+  text, so wording changes are tolerated better than exact string matching.
+- These teacher metrics are currently preparatory for richer schemas. The
+  header/order extraction schema does not yet ask vLLM to emit those fields.
 
 Run the current balanced eval:
 

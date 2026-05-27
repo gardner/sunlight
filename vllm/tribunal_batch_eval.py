@@ -23,6 +23,7 @@ run_eval = runner.run_eval
 score_predictions = runner.score_predictions
 strip_front_matter = extract.strip_front_matter
 extract_gold_case_data = extract.extract_gold_case_data
+extract_teacher_case_data = extract.extract_teacher_case_data
 extract_citation = extract.extract_citation
 normalize_party_value = extract.normalize_party_value
 normalize_string = extract.normalize_string

@@ -8,11 +8,12 @@ import random
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any
 
 from vllm.tribunal_eval_extract import (
+    GENERATED_FIELDS,
     JSON_SCHEMA_NAME,
     SCHEMA_FIELDS,
     application_number_from_citation,
@@ -23,6 +24,8 @@ from vllm.tribunal_eval_extract import (
     extract_citation,
     extract_gold_case_data,
     extract_json_content,
+    extract_teacher_case_data,
+    generated_field_score,
     strip_front_matter,
     values_match,
 )
@@ -44,6 +47,7 @@ class CaseRecord:
     gold_fields: dict[str, Any]
     approximate_tokens: int
     redacted: bool
+    teacher_fields: dict[str, Any] = dataclass_field(default_factory=dict)
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,6 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
+    parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--no-balanced-redactions", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -70,6 +75,7 @@ def load_case_record(markdown_path: Path, sidecar_path: Path) -> CaseRecord:
     body = strip_front_matter(markdown_text)
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     gold_fields = extract_gold_case_data(markdown_text=markdown_text, sidecar=sidecar)
+    teacher_fields = extract_teacher_case_data(markdown_text)
     prompt_text = build_prompt_content(body)
     redacted = (
         gold_fields["has_name_redactions"]
@@ -85,6 +91,7 @@ def load_case_record(markdown_path: Path, sidecar_path: Path) -> CaseRecord:
         gold_fields=gold_fields,
         approximate_tokens=approximate_token_count(prompt_text),
         redacted=redacted,
+        teacher_fields=teacher_fields,
     )
 
 
@@ -167,6 +174,7 @@ def build_payload(
     cases: list[CaseRecord],
     temperature: float,
     max_tokens: int,
+    enable_thinking: bool,
 ) -> dict[str, Any]:
     messages = [
         [{"role": "user", "content": build_prompt_content(case.markdown_text)}]
@@ -177,7 +185,7 @@ def build_payload(
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "chat_template_kwargs": {"enable_thinking": False},
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -226,15 +234,78 @@ def parse_predictions(cases: list[CaseRecord], response_json: dict[str, Any]) ->
     return predictions
 
 
+def build_generated_field_totals() -> dict[str, dict[str, Any]]:
+    return {
+        field: {
+            "scored": 0,
+            "predicted": 0,
+            "exact": 0,
+            "precision_sum": 0.0,
+            "recall_sum": 0.0,
+            "f1_sum": 0.0,
+        }
+        for field in GENERATED_FIELDS
+    }
+
+
+def round_score_value(value: Any) -> Any:
+    return round(value, 4) if isinstance(value, float) else value
+
+
+def summarize_generated_fields(
+    field_totals: dict[str, dict[str, Any]],
+    total_scored: int,
+    total_predicted: int,
+    total_exact: int,
+    precision_sum: float,
+    recall_sum: float,
+    f1_sum: float,
+) -> dict[str, Any]:
+    field_summary = {
+        field: {
+            "scored": totals["scored"],
+            "predicted_field_instances": totals["predicted"],
+            "exact_matches": totals["exact"],
+            "exact_accuracy": round(totals["exact"] / totals["scored"], 4) if totals["scored"] else None,
+            "average_precision": round(totals["precision_sum"] / totals["scored"], 4) if totals["scored"] else None,
+            "average_recall": round(totals["recall_sum"] / totals["scored"], 4) if totals["scored"] else None,
+            "average_f1": round(totals["f1_sum"] / totals["scored"], 4) if totals["scored"] else None,
+        }
+        for field, totals in field_totals.items()
+    }
+    overall = {
+        "field_instances": total_scored,
+        "predicted_field_instances": total_predicted,
+        "exact_matches": total_exact,
+        "exact_accuracy": round(total_exact / total_scored, 4) if total_scored else None,
+        "average_precision": round(precision_sum / total_scored, 4) if total_scored else None,
+        "average_recall": round(recall_sum / total_scored, 4) if total_scored else None,
+        "average_f1": round(f1_sum / total_scored, 4) if total_scored else None,
+    }
+    return {
+        "reference": "minimax_frontmatter",
+        "overall": overall,
+        "fields": field_summary,
+    }
+
+
 def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, Any]]) -> dict[str, Any]:
     field_totals = {field: {"correct": 0, "scored": 0} for field in SCHEMA_FIELDS}
+    generated_totals = build_generated_field_totals()
     case_results: list[dict[str, Any]] = []
     fully_correct_cases = 0
+    generated_scored = 0
+    generated_predicted = 0
+    generated_exact = 0
+    generated_precision_sum = 0.0
+    generated_recall_sum = 0.0
+    generated_f1_sum = 0.0
     for case in cases:
         predicted = predictions.get(case.order_id, {})
         mismatched_fields: list[str] = []
         matched_fields = 0
         scored_fields = 0
+        generated_field_scores: dict[str, dict[str, Any]] = {}
         for field in SCHEMA_FIELDS:
             gold_value = case.gold_fields.get(field)
             if gold_value is None:
@@ -246,6 +317,29 @@ def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, 
                 field_totals[field]["correct"] += 1
             else:
                 mismatched_fields.append(field)
+        for field, gold_value in case.teacher_fields.items():
+            score = generated_field_score(field, gold_value, predicted.get(field))
+            if score is None:
+                continue
+            generated_scored += 1
+            generated_totals[field]["scored"] += 1
+            if score["predicted"]:
+                generated_predicted += 1
+                generated_totals[field]["predicted"] += 1
+            if score["exact"]:
+                generated_exact += 1
+                generated_totals[field]["exact"] += 1
+            generated_precision_sum += score["precision"]
+            generated_recall_sum += score["recall"]
+            generated_f1_sum += score["f1"]
+            generated_totals[field]["precision_sum"] += score["precision"]
+            generated_totals[field]["recall_sum"] += score["recall"]
+            generated_totals[field]["f1_sum"] += score["f1"]
+            generated_field_scores[field] = {
+                key: round_score_value(value)
+                for key, value in score.items()
+                if key != "predicted"
+            }
         if scored_fields and matched_fields == scored_fields:
             fully_correct_cases += 1
         case_results.append(
@@ -255,6 +349,7 @@ def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, 
                 "matched_fields": matched_fields,
                 "scored_fields": scored_fields,
                 "mismatched_fields": mismatched_fields,
+                "generated_field_scores": generated_field_scores,
             }
         )
     field_summary = {
@@ -272,6 +367,15 @@ def score_predictions(cases: list[CaseRecord], predictions: dict[str, dict[str, 
             "fully_correct_case_accuracy": round(fully_correct_cases / len(cases), 4) if cases else None,
         },
         "fields": field_summary,
+        "generated_fields": summarize_generated_fields(
+            field_totals=generated_totals,
+            total_scored=generated_scored,
+            total_predicted=generated_predicted,
+            total_exact=generated_exact,
+            precision_sum=generated_precision_sum,
+            recall_sum=generated_recall_sum,
+            f1_sum=generated_f1_sum,
+        ),
         "case_results": case_results,
     }
 
@@ -285,6 +389,7 @@ def compact_case_manifest(cases: list[CaseRecord]) -> list[dict[str, Any]]:
             "approximate_tokens": case.approximate_tokens,
             "redacted": case.redacted,
             "gold_fields": case.gold_fields,
+            "teacher_fields": case.teacher_fields,
         }
         for case in cases
     ]
@@ -304,6 +409,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         cases=cases,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        enable_thinking=args.enable_thinking,
     )
     run_name = args.run_name or time.strftime("tribunal_batch_eval_%Y%m%d_%H%M%S", time.gmtime())
     output_dir = args.output_dir.resolve()
@@ -316,6 +422,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         "run_name": run_name,
         "base_url": args.base_url,
         "model": args.model,
+        "enable_thinking": args.enable_thinking,
         "case_count": len(cases),
         "redacted_cases": sum(1 for case in cases if case.redacted),
         "approximate_prompt_tokens": sum(case.approximate_tokens for case in cases),
@@ -331,6 +438,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
             "case_count": len(cases),
             "redacted_cases": manifest["redacted_cases"],
             "approximate_prompt_tokens": manifest["approximate_prompt_tokens"],
+            "enable_thinking": args.enable_thinking,
         }
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return summary
@@ -350,6 +458,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         "case_count": len(cases),
         "redacted_cases": manifest["redacted_cases"],
         "approximate_prompt_tokens": manifest["approximate_prompt_tokens"],
+        "enable_thinking": args.enable_thinking,
         "manifest_path": str(manifest_path),
         "payload_path": str(payload_path),
         "response_path": str(response_path),

@@ -89,6 +89,24 @@ N Small 15 October 2025
 """
 
 
+TEACHER_MARKDOWN = """---
+document_id: "doc_justice_tenancy_240225060"
+llm_enrichment_model: "MiniMax-M2.7-highspeed"
+case_summary: "The Tribunal distributed the bond and dismissed exemplary damages."
+catchwords: ["bond distribution", "exemplary damages"]
+questions_answered: ["How should the bond be distributed?", "Should exemplary damages be awarded?"]
+applicant_story: "The tenant sought return of the bond and exemplary damages."
+respondent_story: "The landlord agreed to the bond distribution at the hearing."
+neutral_fact_pattern: "The parties disputed the bond distribution after the tenancy ended."
+claims_made: ["Tenant claimed return of the bond", "Tenant sought exemplary damages"]
+remedies_sought: ["Return of the bond", "Exemplary damages"]
+legal_principles: [{"principle": "Exemplary damages require unlawful conduct.", "confidence": "medium", "source_section": "reasons"}]
+---
+
+TENANCY TRIBUNAL Remote Location
+"""
+
+
 class StripFrontMatterTests(unittest.TestCase):
     def test_strip_front_matter_returns_body(self) -> None:
         stripped = module.strip_front_matter(UNSUPPRESSED_MARKDOWN)
@@ -151,6 +169,32 @@ class GoldExtractionTests(unittest.TestCase):
         self.assertFalse(gold["has_address_redactions"])
         self.assertEqual(gold["total_award_nzd"], 993.65)
 
+    def test_extract_teacher_case_data_reads_generated_frontmatter_fields(self) -> None:
+        teacher = module.extract_teacher_case_data(TEACHER_MARKDOWN)
+
+        self.assertEqual(
+            teacher["case_summary"],
+            "The Tribunal distributed the bond and dismissed exemplary damages.",
+        )
+        self.assertEqual(teacher["catchwords"], ["bond distribution", "exemplary damages"])
+        self.assertEqual(
+            teacher["questions_answered"],
+            [
+                "How should the bond be distributed?",
+                "Should exemplary damages be awarded?",
+            ],
+        )
+        self.assertEqual(
+            teacher["legal_principles"],
+            [
+                {
+                    "principle": "Exemplary damages require unlawful conduct.",
+                    "confidence": "medium",
+                    "source_section": "reasons",
+                }
+            ],
+        )
+
 
 class PayloadTests(unittest.TestCase):
     def test_build_payload_uses_batch_message_shape_and_json_schema(self) -> None:
@@ -182,12 +226,13 @@ class PayloadTests(unittest.TestCase):
             cases=cases,
             temperature=0.0,
             max_tokens=300,
+            enable_thinking=True,
         )
 
         self.assertEqual(payload["model"], "test-model")
         self.assertEqual(payload["temperature"], 0.0)
         self.assertEqual(payload["max_tokens"], 300)
-        self.assertEqual(payload["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertEqual(payload["chat_template_kwargs"], {"enable_thinking": True})
         self.assertEqual(len(payload["messages"]), 2)
         self.assertEqual(payload["messages"][0][0]["role"], "user")
         self.assertIn("You extract structured metadata from a New Zealand Tenancy Tribunal decision.", payload["messages"][0][0]["content"])
@@ -234,6 +279,51 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(summary["fields"]["has_name_redactions"]["correct"], 1)
         self.assertEqual(summary["case_results"][0]["matched_fields"], 3)
         self.assertEqual(summary["case_results"][0]["mismatched_fields"], ["total_award_nzd"])
+
+    def test_score_predictions_reports_teacher_field_overlap_scores(self) -> None:
+        case = module.CaseRecord(
+            order_id="240225060",
+            markdown_path="teacher.md",
+            sidecar_path="teacher.json",
+            markdown_text="Case A",
+            sidecar={},
+            gold_fields={"application_number": "4744510"},
+            approximate_tokens=10,
+            redacted=False,
+            teacher_fields=module.extract_teacher_case_data(TEACHER_MARKDOWN),
+        )
+        predictions = {
+            "240225060": {
+                "application_number": "4744510",
+                "case_summary": "The Tribunal distributed the bond.",
+                "catchwords": ["bond distribution", "damages exemplary"],
+                "questions_answered": ["How should the bond be distributed?"],
+                "legal_principles": [
+                    {
+                        "principle": "Exemplary damages require unlawful conduct.",
+                        "confidence": "high",
+                        "source_section": "order",
+                    }
+                ],
+            }
+        }
+
+        summary = module.score_predictions(cases=[case], predictions=predictions)
+
+        generated = summary["generated_fields"]
+        self.assertEqual(generated["reference"], "minimax_frontmatter")
+        self.assertEqual(generated["overall"]["field_instances"], 9)
+        self.assertEqual(generated["overall"]["predicted_field_instances"], 4)
+        self.assertAlmostEqual(generated["fields"]["case_summary"]["average_f1"], 0.7143)
+        self.assertEqual(generated["fields"]["catchwords"]["exact_matches"], 0)
+        self.assertAlmostEqual(generated["fields"]["catchwords"]["average_f1"], 1.0)
+        self.assertAlmostEqual(generated["fields"]["questions_answered"]["average_recall"], 0.5)
+        self.assertAlmostEqual(generated["fields"]["legal_principles"]["exact_accuracy"], 1.0)
+        self.assertEqual(summary["case_results"][0]["generated_field_scores"]["respondent_story"]["f1"], 0.0)
+        self.assertAlmostEqual(
+            summary["case_results"][0]["generated_field_scores"]["legal_principles"]["f1"],
+            1.0,
+        )
 
     def test_parse_predictions_maps_batch_choice_indices_back_to_cases(self) -> None:
         body = {

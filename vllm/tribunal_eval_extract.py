@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections import Counter
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +27,10 @@ SCHEMA_FIELDS = [
     "payable_by",
     "payable_to",
 ]
+GENERATED_TEXT_FIELDS = ["case_summary", "applicant_story", "respondent_story", "neutral_fact_pattern"]
+GENERATED_LIST_FIELDS = ["catchwords", "questions_answered", "claims_made", "remedies_sought", "llm_suggested_tags"]
+GENERATED_PRINCIPLE_FIELDS = ["legal_principles"]
+GENERATED_FIELDS = GENERATED_TEXT_FIELDS + GENERATED_LIST_FIELDS + GENERATED_PRINCIPLE_FIELDS
 
 ROLE_VALUES = ["landlord", "tenant", "other"]
 PAYABLE_VALUES = ["landlord", "tenant", "other", "none"]
@@ -63,6 +68,27 @@ def strip_front_matter(markdown_text: str) -> str:
     if len(parts) < 3:
         return markdown_text
     return parts[2].lstrip("\n")
+
+
+def parse_front_matter(markdown_text: str) -> tuple[dict[str, Any], str]:
+    if not markdown_text.startswith("---\n"):
+        return {}, markdown_text
+    end_index = markdown_text.find("\n---\n", 4)
+    if end_index == -1:
+        return {}, markdown_text
+    raw_metadata = markdown_text[4:end_index]
+    body = markdown_text[end_index + len("\n---\n") :]
+    if body.startswith("\n"):
+        body = body[1:]
+    metadata: dict[str, Any] = {}
+    for line in raw_metadata.splitlines():
+        if not line.strip():
+            continue
+        key, separator, raw_value = line.partition(":")
+        if not separator:
+            raise ValueError(f"Malformed frontmatter line: {line!r}")
+        metadata[key.strip()] = json.loads(raw_value.strip())
+    return metadata, body
 
 
 def normalize_whitespace(value: str) -> str:
@@ -114,6 +140,18 @@ def to_iso_date(value: str | None) -> str | None:
 
 def approximate_token_count(text: str) -> int:
     return max(1, math.ceil(len(text) / 4))
+
+
+def has_meaningful_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(has_meaningful_value(item) for item in value)
+    if isinstance(value, dict):
+        return bool(value)
+    return True
 
 
 def is_placeholder_text(value: str | None) -> bool:
@@ -376,6 +414,19 @@ def extract_gold_case_data(markdown_text: str, sidecar: dict[str, Any]) -> dict[
     }
 
 
+def extract_teacher_case_data(markdown_text: str) -> dict[str, Any]:
+    try:
+        metadata, _ = parse_front_matter(markdown_text)
+    except (ValueError, json.JSONDecodeError):
+        return {}
+    teacher_fields: dict[str, Any] = {}
+    for field in GENERATED_FIELDS:
+        value = metadata.get(field)
+        if has_meaningful_value(value):
+            teacher_fields[field] = value
+    return teacher_fields
+
+
 def schema_property(definition: dict[str, Any]) -> dict[str, Any]:
     return {"anyOf": [definition, {"type": "null"}]}
 
@@ -432,6 +483,117 @@ def clean_prediction_values(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: clean_prediction_values(item) for key, item in value.items()}
     return value
+
+
+def tokenize_text(value: Any) -> list[str]:
+    return re.findall(r"[a-z0-9]+", normalize_string(value))
+
+
+def overlap_scores(gold_value: Any, predicted_value: Any) -> tuple[float, float, float]:
+    gold_tokens = Counter(tokenize_text(gold_value))
+    predicted_tokens = Counter(tokenize_text(predicted_value))
+    if not gold_tokens:
+        return (1.0, 1.0, 1.0) if not predicted_tokens else (0.0, 0.0, 0.0)
+    if not predicted_tokens:
+        return 0.0, 0.0, 0.0
+    overlap = sum((gold_tokens & predicted_tokens).values())
+    precision = overlap / sum(predicted_tokens.values())
+    recall = overlap / sum(gold_tokens.values())
+    if not precision and not recall:
+        return 0.0, 0.0, 0.0
+    return precision, recall, 2 * precision * recall / (precision + recall)
+
+
+def string_items(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_items = value if isinstance(value, list) else [value]
+    items: list[str] = []
+    for item in raw_items:
+        text = normalize_whitespace(str(item)).strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def legal_principle_items(value: Any) -> list[str]:
+    if value is None:
+        return []
+    raw_items = value if isinstance(value, list) else [value]
+    items: list[str] = []
+    for item in raw_items:
+        principle = item.get("principle") if isinstance(item, dict) else item
+        text = normalize_whitespace(str(principle)).strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def exact_item_signature(items: list[str]) -> list[str]:
+    return sorted(normalize_string(item) for item in items)
+
+
+def greedy_list_overlap_scores(gold_items: list[str], predicted_items: list[str]) -> tuple[float, float, float]:
+    if not gold_items:
+        return (1.0, 1.0, 1.0) if not predicted_items else (0.0, 0.0, 0.0)
+    if not predicted_items:
+        return 0.0, 0.0, 0.0
+    pairs: list[tuple[float, int, int]] = []
+    for gold_index, gold_item in enumerate(gold_items):
+        for predicted_index, predicted_item in enumerate(predicted_items):
+            _, _, f1 = overlap_scores(gold_item, predicted_item)
+            if f1:
+                pairs.append((f1, gold_index, predicted_index))
+    pairs.sort(reverse=True)
+    matched_score = 0.0
+    used_gold: set[int] = set()
+    used_predicted: set[int] = set()
+    for f1, gold_index, predicted_index in pairs:
+        if gold_index in used_gold or predicted_index in used_predicted:
+            continue
+        used_gold.add(gold_index)
+        used_predicted.add(predicted_index)
+        matched_score += f1
+    precision = matched_score / len(predicted_items)
+    recall = matched_score / len(gold_items)
+    if not precision and not recall:
+        return 0.0, 0.0, 0.0
+    return precision, recall, 2 * precision * recall / (precision + recall)
+
+
+def generated_field_score(field: str, gold_value: Any, predicted_value: Any) -> dict[str, Any] | None:
+    if field in GENERATED_TEXT_FIELDS:
+        precision, recall, f1 = overlap_scores(gold_value, predicted_value)
+        return {
+            "predicted": has_meaningful_value(predicted_value),
+            "exact": normalize_string(gold_value) == normalize_string(predicted_value),
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        }
+    if field in GENERATED_LIST_FIELDS:
+        gold_items = string_items(gold_value)
+        predicted_items = string_items(predicted_value)
+        precision, recall, f1 = greedy_list_overlap_scores(gold_items, predicted_items)
+        return {
+            "predicted": bool(predicted_items),
+            "exact": exact_item_signature(gold_items) == exact_item_signature(predicted_items),
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        }
+    if field in GENERATED_PRINCIPLE_FIELDS:
+        gold_items = legal_principle_items(gold_value)
+        predicted_items = legal_principle_items(predicted_value)
+        precision, recall, f1 = greedy_list_overlap_scores(gold_items, predicted_items)
+        return {
+            "predicted": bool(predicted_items),
+            "exact": exact_item_signature(gold_items) == exact_item_signature(predicted_items),
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        }
+    return None
 
 
 def normalize_redacted_name(value: Any) -> str:

@@ -787,6 +787,16 @@ Cloudflare resources:
 * Active authorities still needing first scrape attempt: 0
 * Inactive imported authorities: 238
 * Current blocker for a complete send-ready set: A large portion of authorities still lack a candidate email address. The search-seeded pass has been run, yielding a modest improvement. Further investigation into difficult-to-scrape authorities or alternative data sources may be needed.
+* Extended the standalone `vllm/tribunal_batch_eval.py` harness with non-LLM
+  MiniMax teacher scoring for generated retrieval fields. Real tribunal case
+  manifests now carry frontmatter-derived `teacher_fields` for
+  `case_summary`, `catchwords`, `questions_answered`, `applicant_story`,
+  `respondent_story`, `neutral_fact_pattern`, `claims_made`,
+  `remedies_sought`, and `legal_principles`. The scorer uses lexical token
+  overlap for free-text fields plus greedy item-level precision/recall/F1 for
+  list and legal-principle fields, so future vLLM parameter sweeps can be
+  graded without an LLM judge. A `--dry-run` over real cases confirmed the
+  sampled records carried all nine teacher fields.
 
 Known issue:
 
@@ -809,10 +819,12 @@ Important naming boundary:
 1. Inspect the `tribunal_big_96_v2` misses by field and by document, especially
    tribunal-location normalization, placeholder-party naming, and ambiguous
    payable-direction cases.
-2. Tighten the vLLM extraction prompt and output post-processing, then rerun
-   the same balanced 96-case batch so the next comparison is apples-to-apples.
-3. Expand the standalone vLLM eval from header/order fields into claim and
-   outcome extraction once the basic metadata slice is stable.
+2. Expand the vLLM output schema to emit the MiniMax-style generated retrieval
+   fields so the new non-LLM teacher scorer can grade real predictions instead
+   of just the structured header/order slice.
+3. Run a small generated-field sweep first on batch sizes `1` and `8`, then
+   compare structured exact-field accuracy and teacher-field overlap metrics
+   before scaling back up to the balanced 96-case run.
 4. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
    `tenancy-llm-v2` refresh completes, watching persisted failures and
    Instructor retry volume.
