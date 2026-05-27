@@ -820,6 +820,13 @@ Cloudflare resources:
   `vllm/results/tribunal_docling_full_20260527_225730`; after the first two
   batches it had processed 192 documents with no failed batches, and repaired a
   known truncation outlier (`172070039`) by retrying it at `640` output tokens.
+* Updated the full-corpus Docling runner to dispatch up to two batch HTTP
+  requests concurrently, which matches the two vLLM instances behind the load
+  balancer. The active run was resumed in place with
+  `--max-concurrent-batches 2`, and the first resumed window completed 384
+  documents across four clean batches in about 39 seconds, roughly doubling the
+  earlier single-lane throughput while keeping `96/96` parseable and
+  `96/96` schema-valid outputs per batch.
 
 Known issue:
 

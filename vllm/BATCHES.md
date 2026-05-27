@@ -378,12 +378,17 @@ It writes a dedicated folder containing:
 The runner uses token-bounded shard planning and automatically retries
 schema-invalid cases one by one with larger `max_tokens`, which repaired the
 known long-party-name truncation for order `172070039` at `640` tokens.
+It also supports concurrent HTTP dispatch; with two vLLM instances behind the
+load balancer, `--max-concurrent-batches 2` kept two batch requests in flight
+and roughly doubled the corpus-run throughput without degrading schema-valid
+rates in the first resumed batches.
 
 Launch the full corpus run:
 
 ```bash
 uv run python vllm/tribunal_process_docling.py \
-  --output-dir vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS
+  --output-dir vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS \
+  --max-concurrent-batches 2
 ```
 
 Monitor it with:

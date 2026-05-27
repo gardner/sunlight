@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--thinking-token-budget", type=int, default=None)
+    parser.add_argument("--max-concurrent-batches", type=int, default=2)
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
 
@@ -84,6 +87,7 @@ def initialize_run(output_dir: Path, args: argparse.Namespace, cases: list[runne
             "timeout_seconds": args.timeout_seconds,
             "enable_thinking": args.enable_thinking,
             "thinking_token_budget": args.thinking_token_budget,
+            "max_concurrent_batches": args.max_concurrent_batches,
             "total_cases": len(cases),
             "planned_batches": len(batches),
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -100,7 +104,7 @@ def update_progress(
     completed_batches: int,
     failed_batches: list[str],
     started_at: float,
-    current_batch: str | None,
+    current_batches: list[str],
 ) -> None:
     write_json(
         progress_path(output_dir),
@@ -110,7 +114,8 @@ def update_progress(
             "completed_cases": completed_cases,
             "completed_batches": completed_batches,
             "failed_batches": failed_batches,
-            "current_batch": current_batch,
+            "current_batch": current_batches[0] if len(current_batches) == 1 else None,
+            "current_batches": current_batches,
             "elapsed_seconds": round(time.time() - started_at, 3),
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
@@ -122,21 +127,23 @@ def append_extractions(
     batch: str,
     cases: list[runner.CaseRecord],
     summary: dict[str, Any],
+    append_lock: threading.Lock,
 ) -> None:
     predictions = summary["predictions"]
     case_results = {item["order_id"]: item for item in summary["scores"]["case_results"]}
-    with extractions_path(output_dir).open("a", encoding="utf-8") as handle:
-        for case in cases:
-            result = case_results.get(case.order_id, {})
-            payload = {
-                "batch": batch,
-                "order_id": case.order_id,
-                "markdown_path": case.markdown_path,
-                "prediction": predictions.get(case.order_id),
-                "schema_valid": result.get("schema_valid"),
-                "schema_errors": result.get("schema_errors"),
-            }
-            handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    with append_lock:
+        with extractions_path(output_dir).open("a", encoding="utf-8") as handle:
+            for case in cases:
+                result = case_results.get(case.order_id, {})
+                payload = {
+                    "batch": batch,
+                    "order_id": case.order_id,
+                    "markdown_path": case.markdown_path,
+                    "prediction": predictions.get(case.order_id),
+                    "schema_valid": result.get("schema_valid"),
+                    "schema_errors": result.get("schema_errors"),
+                }
+                handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
 def retry_token_values(base_max_tokens: int) -> list[int]:
@@ -215,6 +222,7 @@ def run_batch(
     args: argparse.Namespace,
     batch: str,
     cases: list[runner.CaseRecord],
+    append_lock: threading.Lock,
 ) -> dict[str, Any]:
     summary = run_cases_once(output_dir, args, batch, cases, max_tokens=args.max_tokens)
     retries: list[dict[str, Any]] = []
@@ -248,8 +256,12 @@ def run_batch(
         summary["scores"] = runner.score_predictions(cases=cases, predictions=predictions)
         summary["retries"] = retries
     write_json(output_dir / f"{batch}_summary.json", summary)
-    append_extractions(output_dir, batch, cases, summary)
+    append_extractions(output_dir, batch, cases, summary, append_lock)
     return summary
+
+
+def current_batch_names(running: dict[Future[dict[str, Any]], tuple[int, str, list[runner.CaseRecord]]]) -> list[str]:
+    return sorted(batch for _, batch, _ in running.values())
 
 
 def process_all(args: argparse.Namespace) -> Path:
@@ -267,26 +279,28 @@ def process_all(args: argparse.Namespace) -> Path:
     completed_cases = 0
     completed_batches = 0
     started_at = time.time()
-    for index, batch_cases in enumerate(batches):
-        batch = batch_name(index)
-        if index in completed:
-            completed_batches += 1
-            completed_cases += len(batch_cases)
-            continue
-        update_progress(
-            output_dir,
-            total_cases=len(cases),
-            total_batches=len(batches),
-            completed_cases=completed_cases,
-            completed_batches=completed_batches,
-            failed_batches=failed_batches,
-            started_at=started_at,
-            current_batch=batch,
-        )
-        try:
-            run_batch(output_dir, args, batch, batch_cases)
-        except Exception:
-            failed_batches.append(batch)
+    append_lock = threading.Lock()
+    remaining = [
+        (index, batch_name(index), batch_cases)
+        for index, batch_cases in enumerate(batches)
+        if index not in completed
+    ]
+    for index, _, batch_cases in [
+        (index, batch_name(index), batch_cases)
+        for index, batch_cases in enumerate(batches)
+        if index in completed
+    ]:
+        completed_batches += 1
+        completed_cases += len(batch_cases)
+    running: dict[Future[dict[str, Any]], tuple[int, str, list[runner.CaseRecord]]] = {}
+    cursor = 0
+    with ThreadPoolExecutor(max_workers=max(1, args.max_concurrent_batches)) as executor:
+        while cursor < len(remaining) or running:
+            while cursor < len(remaining) and len(running) < max(1, args.max_concurrent_batches):
+                index, batch, batch_cases = remaining[cursor]
+                cursor += 1
+                future = executor.submit(run_batch, output_dir, args, batch, batch_cases, append_lock)
+                running[future] = (index, batch, batch_cases)
             update_progress(
                 output_dir,
                 total_cases=len(cases),
@@ -295,21 +309,40 @@ def process_all(args: argparse.Namespace) -> Path:
                 completed_batches=completed_batches,
                 failed_batches=failed_batches,
                 started_at=started_at,
-                current_batch=batch,
+                current_batches=current_batch_names(running),
             )
-            raise
-        completed_batches += 1
-        completed_cases += len(batch_cases)
-        update_progress(
-            output_dir,
-            total_cases=len(cases),
-            total_batches=len(batches),
-            completed_cases=completed_cases,
-            completed_batches=completed_batches,
-            failed_batches=failed_batches,
-            started_at=started_at,
-            current_batch=None,
-        )
+            done, _ = wait(running.keys(), return_when=FIRST_COMPLETED)
+            for future in done:
+                _, batch, batch_cases = running.pop(future)
+                try:
+                    future.result()
+                except Exception:
+                    failed_batches.append(batch)
+                    for pending in running:
+                        pending.cancel()
+                    update_progress(
+                        output_dir,
+                        total_cases=len(cases),
+                        total_batches=len(batches),
+                        completed_cases=completed_cases,
+                        completed_batches=completed_batches,
+                        failed_batches=failed_batches,
+                        started_at=started_at,
+                        current_batches=current_batch_names(running),
+                    )
+                    raise
+                completed_batches += 1
+                completed_cases += len(batch_cases)
+            update_progress(
+                output_dir,
+                total_cases=len(cases),
+                total_batches=len(batches),
+                completed_cases=completed_cases,
+                completed_batches=completed_batches,
+                failed_batches=failed_batches,
+                started_at=started_at,
+                current_batches=current_batch_names(running),
+            )
     write_json(
         output_dir / "aggregate_summary.json",
         {
