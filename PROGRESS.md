@@ -539,6 +539,33 @@ Completed:
   and 6 `private_date`; it avoided most redacted-placeholder noise but missed
   some suppressed placeholder-only decisions and still confused some
   organizations/pronouns with people.
+* Added a standalone `vllm/tribunal_batch_eval.py` harness plus
+  `tests/test_vllm_tribunal_batch_eval.py` so real Tenancy Tribunal markdown can
+  be batch-scored through the vLLM OpenAI-compatible endpoint without using the
+  existing `scripts/` ingestion pipeline.
+* The new harness pairs real decisions from
+  `storage/justice/tenancy/markdown_docling` with Justice sidecars only for
+  discovery/provenance, derives gold header/order fields from the markdown
+  itself, sends one JSON-schema extraction request per case through
+  `/v1/chat/completions/batch`, and writes a manifest, payload, raw response,
+  and scored summary under `vllm/results/`.
+* Ran a balanced real-case batch as `tribunal_big_96_v2`: 96 cases total, 48
+  redacted and 48 non-redacted, about 215,596 prompt tokens and 20,544
+  completion tokens, completed in 21.695 seconds on
+  `RedHatAI/Qwen3.6-35B-A3B-NVFP4`.
+* The 96-case batch produced 48/96 fully correct case records (`0.5000`
+  exact-case accuracy) and `0.9472` aggregate scored-field accuracy. Strong
+  fields were citation, application number, decision date, adjudicator,
+  applicant/respondent roles, payable-to direction, and redaction booleans.
+  The main weak fields were tribunal location (`0.6702`), applicant name
+  (`0.8830`), payable-by (`0.8841`), total award / main payable amount
+  (`0.9079`), and respondent name (`0.9247`).
+* The balanced run showed the batch endpoint itself is viable for the use case:
+  JSON-schema structured extraction stayed stable across a ~236k-token total
+  transaction. Accuracy degradation is concentrated in specific metadata fields
+  rather than general batch collapse. Redacted cases are meaningfully harder:
+  exact-case accuracy was `0.3542` for redacted decisions versus `0.6458` for
+  non-redacted decisions.
 
 ## Verification
 
@@ -734,6 +761,8 @@ tokenizer = AutoTokenizer.from_pretrained(model_id)
 print(config.model_type, getattr(config, "max_position_embeddings", None), tokenizer.model_max_length)
 PY
 uv run python scripts/scan_pii_privacy_filter.py --markdown-dir storage/justice/tenancy/markdown_docling --limit 25 --output-jsonl logs/tenancy-pii-openai-privacy-filter-canary-25.jsonl --summary-json logs/tenancy-pii-openai-privacy-filter-canary-25-summary.json
+uv run python -m unittest tests/test_vllm_tribunal_batch_eval.py
+uv run python vllm/tribunal_batch_eval.py --case-count 96 --run-name tribunal_big_96_v2
 ```
 
 ## Notes
@@ -777,66 +806,73 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
+1. Inspect the `tribunal_big_96_v2` misses by field and by document, especially
+   tribunal-location normalization, placeholder-party naming, and ambiguous
+   payable-direction cases.
+2. Tighten the vLLM extraction prompt and output post-processing, then rerun
+   the same balanced 96-case batch so the next comparison is apples-to-apples.
+3. Expand the standalone vLLM eval from header/order fields into claim and
+   outcome extraction once the basic metadata slice is stable.
+4. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
    `tenancy-llm-v2` refresh completes, watching persisted failures and
    Instructor retry volume.
-2. Compare the GLiNER and OpenAI Privacy Filter canaries side by side. OpenAI
+5. Compare the GLiNER and OpenAI Privacy Filter canaries side by side. OpenAI
    Privacy Filter currently looks cleaner for redacted-placeholder noise, while
    GLiNER has more configurable-label recall and more false positives.
-3. Tune Privacy Filter post-filters first: remove pronouns/role words, treat
+6. Tune Privacy Filter post-filters first: remove pronouns/role words, treat
    known agency/property-management names separately, and decide whether
    adjudicator names should count as review-relevant PII.
-4. If the tuned Privacy Filter canary is useful, run the full JSONL audit and summarize
+7. If the tuned Privacy Filter canary is useful, run the full JSONL audit and summarize
    documents that need human redaction review before using results in a
    publication workflow.
-5. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
+8. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
    at 15+ scheduled RPM. If it is still worth using, first test a lower
    scheduled rate with an explicit in-flight cap, then implement provider-level
    caps before alternating providers.
-6. If `json_schema` proves unstable with `MiniMax-M2.7-highspeed`, retry with
+9. If `json_schema` proves unstable with `MiniMax-M2.7-highspeed`, retry with
    `json_mode` before falling back to `md_json`, since `md_json` has the
    broadest compatibility but the weakest speed and accuracy profile.
-7. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
+10. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
    and `scripts/eval_search.py --agentic --no-rerank`, then compare final
    recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-8. Resume Tenancy embedding for the converted legacy markdown with
+11. Resume Tenancy embedding for the converted legacy markdown with
    `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
    updated LanceDB row counts.
-9. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
+12. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
    arrears, bond, suppression, statute-section, amount-heavy, and
    absent-answer cases.
-10. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
+13. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
    existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
-11. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
+14. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
    enabling Tenancy in public search.
-12. Update the landing search API and UI for multi-source citations, labels, and
+15. Update the landing search API and UI for multi-source citations, labels, and
    source filters.
-13. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
-14. Choose the Hugging Face dataset repo id, visibility, and license wording,
+16. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
+17. Choose the Hugging Face dataset repo id, visibility, and license wording,
    then publish with the exporter upload command.
-15. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
+18. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
    stays living; use full snapshots by default and delta exports when append-only
    updates are useful.
-16. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
+19. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
    PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
    metadata.
-17. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
+20. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
    run the first eval set against both pipelines.
-18. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
+21. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
    so answers can use full chunks instead of Vectorize `text_preview` metadata.
-19. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
+22. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
    to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
    reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-20. Continue expanding the reviewed eval manifest, especially with more
+23. Continue expanding the reviewed eval manifest, especially with more
    numeric/table-heavy FYI records and additional production failures once
    search logs expose them.
-21. Add optional local vLLM answer generation and answer-grounding checks to the
+24. Add optional local vLLM answer generation and answer-grounding checks to the
    eval harness after retrieval metrics are stable.
-22. Add exact query response caching for `/api/search` to reduce repeated answer
+25. Add exact query response caching for `/api/search` to reduce repeated answer
    generation cost and latency.
-23. Consider moving the search UI to AI SDK `useChat`/streaming once citations
+26. Consider moving the search UI to AI SDK `useChat`/streaming once citations
    can be sent as structured stream data instead of one JSON response.
-24. Do a controlled live Cloudflare Email Sending test before sending to real
+27. Do a controlled live Cloudflare Email Sending test before sending to real
    authorities.
-25. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
+28. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
    if the R2 API token is rotated.
