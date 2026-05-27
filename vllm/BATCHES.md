@@ -361,6 +361,38 @@ Current weak fields:
 - total_award_nzd
 - respondent_name
 
+## Full Docling Run
+
+`vllm/tribunal_process_docling.py` runs the same structured extractor across
+all Docling markdown files, even when no Justice sidecar is present.
+
+It writes a dedicated folder containing:
+
+- `run_config.json`
+- `progress.json`
+- `aggregate_summary.json`
+- per-batch `*_cases.json`, `*_payload.json`, `*_response.json`,
+  and `*_summary.json`
+- append-only `extractions.jsonl`
+
+The runner uses token-bounded shard planning and automatically retries
+schema-invalid cases one by one with larger `max_tokens`, which repaired the
+known long-party-name truncation for order `172070039` at `640` tokens.
+
+Launch the full corpus run:
+
+```bash
+uv run python vllm/tribunal_process_docling.py \
+  --output-dir vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS
+```
+
+Monitor it with:
+
+```bash
+cat vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS/progress.json
+tail -f vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS/run.log
+```
+
 ## References
 
 - vLLM batched chat completions example: https://docs.vllm.ai/en/latest/examples/generate/batched_chat_completions_online/

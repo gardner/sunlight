@@ -24,6 +24,7 @@ from vllm.tribunal_eval_extract import (
     extract_citation,
     extract_gold_case_data,
     extract_json_content,
+    parse_front_matter,
     extract_teacher_case_data,
     generated_field_score,
     strip_front_matter,
@@ -98,6 +99,36 @@ def load_case_record(markdown_path: Path, sidecar_path: Path) -> CaseRecord:
     )
 
 
+def order_id_from_markdown(markdown_path: Path, metadata: dict[str, Any]) -> str:
+    tenancy_order_id = metadata.get("tenancy_order_id")
+    if tenancy_order_id:
+        return str(tenancy_order_id)
+    document_id = metadata.get("document_id")
+    if isinstance(document_id, str) and document_id.startswith("doc_justice_tenancy_"):
+        return document_id.removeprefix("doc_justice_tenancy_")
+    return markdown_path.stem.removeprefix("doc_justice_tenancy_")
+
+
+def load_markdown_only_record(markdown_path: Path) -> CaseRecord:
+    markdown_text = markdown_path.read_text(encoding="utf-8", errors="replace")
+    metadata, body = parse_front_matter(markdown_text)
+    prompt_text = build_prompt_content(body)
+    gold_fields = extract_gold_case_data(markdown_text=markdown_text, sidecar={})
+    teacher_fields = extract_teacher_case_data(markdown_text)
+    redacted = gold_fields["has_name_redactions"] or gold_fields["has_address_redactions"]
+    return CaseRecord(
+        order_id=order_id_from_markdown(markdown_path, metadata),
+        markdown_path=str(markdown_path),
+        sidecar_path="",
+        markdown_text=body,
+        sidecar={},
+        gold_fields=gold_fields,
+        approximate_tokens=approximate_token_count(prompt_text),
+        redacted=redacted,
+        teacher_fields=teacher_fields,
+    )
+
+
 def load_candidates(markdown_dir: Path, sidecar_dir: Path) -> list[CaseRecord]:
     candidates: list[CaseRecord] = []
     for sidecar_path in sorted(sidecar_dir.glob("*.json")):
@@ -111,6 +142,15 @@ def load_candidates(markdown_dir: Path, sidecar_dir: Path) -> list[CaseRecord]:
             continue
     if not candidates:
         raise FileNotFoundError("No paired tribunal markdown and sidecar files were found.")
+    return candidates
+
+
+def load_markdown_candidates(markdown_dir: Path) -> list[CaseRecord]:
+    candidates: list[CaseRecord] = []
+    for markdown_path in sorted(markdown_dir.glob("*.md")):
+        candidates.append(load_markdown_only_record(markdown_path))
+    if not candidates:
+        raise FileNotFoundError("No tribunal markdown files were found.")
     return candidates
 
 
@@ -177,6 +217,28 @@ def discover_cases(
 
 def reserved_case_tokens(case: CaseRecord, thinking_token_budget: int | None) -> int:
     return case.approximate_tokens + max(0, thinking_token_budget or 0)
+
+
+def build_case_batches(
+    ordered: list[CaseRecord],
+    max_cases_per_batch: int,
+    target_batch_tokens: int | None,
+    thinking_token_budget: int | None,
+) -> list[list[CaseRecord]]:
+    remaining = ordered[:]
+    batches: list[list[CaseRecord]] = []
+    while remaining:
+        batch = select_cases(
+            ordered=remaining,
+            case_count=max_cases_per_batch,
+            target_batch_tokens=target_batch_tokens,
+            thinking_token_budget=thinking_token_budget,
+        )
+        if not batch:
+            raise ValueError("Batch planning produced an empty batch.")
+        batches.append(batch)
+        remaining = remaining[len(batch) :]
+    return batches
 
 
 def build_payload(

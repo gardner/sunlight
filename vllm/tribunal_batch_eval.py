@@ -16,8 +16,10 @@ from vllm import tribunal_eval_schema as schema
 
 CaseRecord = runner.CaseRecord
 build_payload = runner.build_payload
+build_case_batches = runner.build_case_batches
 compact_case_manifest = runner.compact_case_manifest
 discover_cases = runner.discover_cases
+load_markdown_only_record = runner.load_markdown_only_record
 parse_predictions = runner.parse_predictions
 post_json = runner.post_json
 reserved_case_tokens = runner.reserved_case_tokens

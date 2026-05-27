@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from vllm import tribunal_batch_eval as module
 
@@ -107,6 +109,41 @@ TENANCY TRIBUNAL Remote Location
 """
 
 
+MARKDOWN_ONLY = """---
+document_id: "doc_justice_tenancy_999"
+tenancy_order_id: "999"
+---
+
+## [2024] NZTT 9999999
+
+## TENANCY TRIBUNAL AT REMOTE LOCATION
+
+APPLICANT:
+
+Example Landlord Limited
+
+Landlord
+
+RESPONDENT:
+
+Example Tenant
+
+Tenant
+
+TENANCY ADDRESS:
+
+1 Example Street, Auckland 1010
+
+## ORDER
+
+1. Example Tenant must pay Example Landlord Limited $123.45 immediately.
+
+## Reasons:
+
+J Example 01 January 2024
+"""
+
+
 class StripFrontMatterTests(unittest.TestCase):
     def test_strip_front_matter_returns_body(self) -> None:
         stripped = module.strip_front_matter(UNSUPPRESSED_MARKDOWN)
@@ -194,6 +231,20 @@ class GoldExtractionTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_load_markdown_only_record_uses_frontmatter_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            markdown_path = Path(tmp_dir) / "doc_justice_tenancy_999.md"
+            markdown_path.write_text(MARKDOWN_ONLY, encoding="utf-8")
+
+            case = module.load_markdown_only_record(markdown_path)
+
+        self.assertEqual(case.order_id, "999")
+        self.assertEqual(case.sidecar_path, "")
+        self.assertEqual(case.sidecar, {})
+        self.assertEqual(case.gold_fields["citation"], "[2024] NZTT 9999999")
+        self.assertEqual(case.gold_fields["decision_date"], "2024-01-01")
+        self.assertFalse(case.redacted)
 
 
 class PayloadTests(unittest.TestCase):
@@ -313,6 +364,30 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual([case.order_id for case in selected], ["1", "2"])
         self.assertEqual(module.reserved_case_tokens(cases[0], 400), 500)
         self.assertEqual(module.reserved_case_tokens(cases[1], 400), 550)
+
+    def test_build_case_batches_splits_all_cases_by_reserved_tokens(self) -> None:
+        cases = [
+            module.CaseRecord(
+                order_id=str(index),
+                markdown_path=f"{index}.md",
+                sidecar_path="",
+                markdown_text="",
+                sidecar={},
+                gold_fields={},
+                approximate_tokens=tokens,
+                redacted=False,
+            )
+            for index, tokens in enumerate([100, 150, 200, 300], start=1)
+        ]
+
+        batches = module.build_case_batches(
+            ordered=cases,
+            max_cases_per_batch=10,
+            target_batch_tokens=650,
+            thinking_token_budget=100,
+        )
+
+        self.assertEqual([[case.order_id for case in batch] for batch in batches], [["1", "2"], ["3"], ["4"]])
 
 
 class ScoringTests(unittest.TestCase):

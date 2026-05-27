@@ -809,6 +809,17 @@ Cloudflare resources:
   per selected case when a target batch token budget is used, and surfaced
   `approximate_reserved_tokens` in run summaries so thinking-enabled sweeps do
   not over-pack batches on prompt length alone.
+* Added `vllm/tribunal_process_docling.py` to run the structured extractor
+  across all Docling markdown directly, without requiring Justice sidecars. It
+  shards the corpus into token-bounded batches, writes per-batch manifest,
+  payload, response, summary, and append-only `extractions.jsonl` outputs into
+  a dedicated result folder, and tracks live progress in `progress.json`. The
+  runner also retries schema-invalid or truncated cases individually with larger
+  `max_tokens` so long-name outliers do not poison whole-batch completeness.
+  The active full-corpus run is
+  `vllm/results/tribunal_docling_full_20260527_225730`; after the first two
+  batches it had processed 192 documents with no failed batches, and repaired a
+  known truncation outlier (`172070039`) by retrying it at `640` output tokens.
 
 Known issue:
 
@@ -831,13 +842,17 @@ Important naming boundary:
 1. Inspect the `tribunal_big_96_v2` misses by field and by document, especially
    tribunal-location normalization, placeholder-party naming, and ambiguous
    payable-direction cases.
-2. Make the tribunal harness context-aware per item by recording and checking
+2. Monitor the active full-corpus Docling run in
+   `vllm/results/tribunal_docling_full_20260527_225730`, confirm retries remain
+   rare, and rerun or isolate any residual schema-invalid cases after the main
+   pass finishes.
+3. Make the tribunal harness context-aware per item by recording and checking
    `prompt + max_tokens` against the chosen model limit, separately from the
    scheduler-style batch reserve heuristic.
-3. Expand the vLLM output schema to emit the MiniMax-style generated retrieval
+4. Expand the vLLM output schema to emit the MiniMax-style generated retrieval
    fields so the new non-LLM teacher scorer can grade real predictions instead
    of just the structured header/order slice.
-4. Run a small generated-field sweep first on batch sizes `1` and `8`, then
+5. Run a small generated-field sweep first on batch sizes `1` and `8`, then
    compare structured exact-field accuracy, schema-valid rate, and teacher-field
    overlap metrics before scaling back up to the balanced 96-case run.
 4. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
