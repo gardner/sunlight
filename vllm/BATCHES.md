@@ -398,6 +398,37 @@ cat vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS/progress.json
 tail -f vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS/run.log
 ```
 
+## Judge Spotcheck
+
+`vllm/tribunal_judge_spotcheck.py` samples completed `extractions.jsonl`
+records, shows the original markdown plus extracted JSON to the vLLM endpoint,
+and asks for a strict JSON audit of inaccuracies or inconsistencies.
+
+It writes a dedicated folder containing:
+
+- `manifest.json`
+- `payload.json`
+- `response.json`
+- `judgments.json`
+- `summary.json`
+- per-case retry payload/response files when the first judgment truncates
+
+Launch a sampled audit like this:
+
+```bash
+uv run python vllm/tribunal_judge_spotcheck.py \
+  --run-dir vllm/results/tribunal_docling_full_YYYYMMDD_HHMMSS \
+  --sample-size 20
+```
+
+The runner retries parse-error judgments one case at a time with larger
+`max_tokens`, because some audits are too verbose for the first pass.
+In the first real 20-case sample under
+`vllm/results/tribunal_docling_full_20260527_225730/judge_spotcheck_20260527_125453`,
+retries reduced parse errors from `16/20` to `3/20`, but the same-model judge
+still over-flagged many cases. Treat this as a triage aid, not a gold-label
+accuracy metric.
+
 ## References
 
 - vLLM batched chat completions example: https://docs.vllm.ai/en/latest/examples/generate/batched_chat_completions_online/

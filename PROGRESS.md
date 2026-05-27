@@ -827,6 +827,20 @@ Cloudflare resources:
   documents across four clean batches in about 39 seconds, roughly doubling the
   earlier single-lane throughput while keeping `96/96` parseable and
   `96/96` schema-valid outputs per batch.
+* Completed the full Docling tribunal extraction run in
+  `vllm/results/tribunal_docling_full_20260527_225730`: all `43,854` markdown
+  documents produced an extraction with `0` failed batches and a final
+  `extractions.jsonl` count of `43,854`.
+* Added `vllm/tribunal_judge_spotcheck.py` plus focused tests so sampled
+  extraction rows can be sent back to the vLLM endpoint as strict JSON
+  document-vs-extraction audits. The runner samples completed `extractions`,
+  numbers markdown lines for evidence references, saves payload/response
+  artifacts, and retries parse-error judgments one case at a time with larger
+  `max_tokens`. A real 20-case sample at
+  `vllm/results/tribunal_docling_full_20260527_225730/judge_spotcheck_20260527_125453`
+  cut parse errors from `16/20` to `3/20`, but the same Qwen judge still
+  over-flagged many likely-correct cases, so the audit is currently useful for
+  triage rather than as a trustworthy automatic score.
 
 Known issue:
 
@@ -849,10 +863,9 @@ Important naming boundary:
 1. Inspect the `tribunal_big_96_v2` misses by field and by document, especially
    tribunal-location normalization, placeholder-party naming, and ambiguous
    payable-direction cases.
-2. Monitor the active full-corpus Docling run in
-   `vllm/results/tribunal_docling_full_20260527_225730`, confirm retries remain
-   rare, and rerun or isolate any residual schema-invalid cases after the main
-   pass finishes.
+2. Review the judge-spotcheck false positives and tighten the audit rubric for
+   application numbers, bilingual tribunal-location headers, role-vs-name
+   fields, and bond-driven payable direction before relying on LLM judging.
 3. Make the tribunal harness context-aware per item by recording and checking
    `prompt + max_tokens` against the chosen model limit, separately from the
    scheduler-style batch reserve heuristic.
@@ -862,10 +875,10 @@ Important naming boundary:
 5. Run a small generated-field sweep first on batch sizes `1` and `8`, then
    compare structured exact-field accuracy, schema-valid rate, and teacher-field
    overlap metrics before scaling back up to the balanced 96-case run.
-4. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
+6. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
    `tenancy-llm-v2` refresh completes, watching persisted failures and
    Instructor retry volume.
-5. Compare the GLiNER and OpenAI Privacy Filter canaries side by side. OpenAI
+7. Compare the GLiNER and OpenAI Privacy Filter canaries side by side. OpenAI
    Privacy Filter currently looks cleaner for redacted-placeholder noise, while
    GLiNER has more configurable-label recall and more false positives.
 6. Tune Privacy Filter post-filters first: remove pronouns/role words, treat
