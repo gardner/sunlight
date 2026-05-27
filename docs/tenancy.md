@@ -119,11 +119,13 @@ This is important because some documents may be partially suppressed, inconsiste
 
 ### 2a. PII span audit
 
-Use `scripts/scan_pii_gliner.py` for an output-only pass with
-`nvidia/gliner-PII` when we want model-assisted review of residual identifiers.
-The scanner reads parsed markdown, scans the body by default, preserves absolute
-body offsets for each span, and writes JSONL plus optional aggregate summary
-JSON. It does not rewrite source markdown.
+Use the output-only PII scanners when we want model-assisted review of residual
+identifiers. The scanners read parsed markdown, scan the body by default,
+preserve absolute body offsets for each span, and write JSONL plus optional
+aggregate summary JSON. They do not rewrite source markdown.
+
+GLiNER has configurable labels but a short 384-token model limit, so use it when
+recall-heavy configurable-label scans are useful:
 
 ```bash
 uv run python scripts/scan_pii_gliner.py \
@@ -131,6 +133,17 @@ uv run python scripts/scan_pii_gliner.py \
   --limit 25 \
   --output-jsonl /tmp/tenancy-pii-gliner.jsonl \
   --summary-json /tmp/tenancy-pii-gliner-summary.json
+```
+
+OpenAI Privacy Filter has a fixed label taxonomy and a 128k-token context window,
+and the first Tenancy canary produced fewer already-redacted placeholder hits:
+
+```bash
+uv run python scripts/scan_pii_privacy_filter.py \
+  --markdown-dir storage/justice/tenancy/markdown_docling \
+  --limit 25 \
+  --output-jsonl /tmp/tenancy-pii-openai-privacy-filter.jsonl \
+  --summary-json /tmp/tenancy-pii-openai-privacy-filter-summary.json
 ```
 
 Review the sampled spans and false positives before running the full corpus or

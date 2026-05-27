@@ -344,12 +344,15 @@ fields for public filtering.
 
 ### GLiNER PII Scan
 
-`scripts/scan_pii_gliner.py` adds a separate audit path for
-`nvidia/gliner-PII`. It scans parsed markdown bodies by default, emits span-level
-JSONL records, and does not mutate source markdown. Use `--include-frontmatter`
-only when auditing metadata fields as well as the decision text.
+`scripts/scan_pii_gliner.py` and `scripts/scan_pii_privacy_filter.py` add
+separate audit paths for model-assisted PII review. Both scan parsed markdown
+bodies by default, emit span-level JSONL records, and do not mutate source
+markdown. Use `--include-frontmatter` only when auditing metadata fields as well
+as the decision text.
 
-Example canary:
+GLiNER (`nvidia/gliner-PII`) has configurable labels but a short 384-token model
+limit, so the scanner chunks by a conservative GLiNER token budget. It can be
+recall-heavy and flags many already-redacted placeholders.
 
 ```bash
 uv run python scripts/scan_pii_gliner.py \
@@ -359,10 +362,22 @@ uv run python scripts/scan_pii_gliner.py \
   --summary-json /tmp/tenancy-pii-gliner-summary.json
 ```
 
-Treat model output as review evidence. The default labels focus on direct
-identifiers such as people, addresses, emails, phone numbers, usernames, ID
-numbers, licences, passports, and financial account numbers. Tune labels and
-thresholds against real Tenancy samples before using the results for publication
+OpenAI Privacy Filter (`openai/privacy-filter`) has a fixed 8-label taxonomy and
+a 128k-token context window, so the scanner can process normal Tenancy decisions
+without chunking. In the initial 25-document canary it produced fewer placeholder
+hits than GLiNER, but still needs review for organization/person ambiguity and
+missed suppressed placeholder-only decisions.
+
+```bash
+uv run python scripts/scan_pii_privacy_filter.py \
+  --markdown-dir storage/justice/tenancy/markdown_docling \
+  --limit 25 \
+  --output-jsonl /tmp/tenancy-pii-openai-privacy-filter.jsonl \
+  --summary-json /tmp/tenancy-pii-openai-privacy-filter-summary.json
+```
+
+Treat model output as review evidence. Tune labels, thresholds, and downstream
+filters against real Tenancy samples before using the results for publication
 workflow decisions.
 
 ## Tenancy Enrichment Schema

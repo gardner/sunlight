@@ -530,6 +530,15 @@ Completed:
   documents scanned, 0 failures, 436 spans, and all 25 documents had at least
   one detected span. Label counts were 357 `person`, 38 `national_id`, 35
   `address`, 3 `bank_account`, 2 `phone_number`, and 1 `credit_card`.
+* Added an output-only OpenAI Privacy Filter scanner and ran the same
+  25-document Tenancy canary. The artifact is
+  `logs/tenancy-pii-openai-privacy-filter-canary-25.jsonl` with summary
+  `logs/tenancy-pii-openai-privacy-filter-canary-25-summary.json`: 25/25
+  documents scanned, 0 failures, 165 spans, and 21 documents had at least one
+  detected span. Label counts were 134 `private_person`, 25 `private_address`,
+  and 6 `private_date`; it avoided most redacted-placeholder noise but missed
+  some suppressed placeholder-only decisions and still confused some
+  organizations/pronouns with people.
 
 ## Verification
 
@@ -715,6 +724,16 @@ print(GLiNER.__name__)
 PY
 uv run python scripts/scan_pii_gliner.py --markdown-dir storage/justice/tenancy/markdown_docling --limit 1 --labels person,address,email,phone_number --threshold 0.3 --output-jsonl /tmp/tenancy-pii-gliner-smoke.jsonl --summary-json /tmp/tenancy-pii-gliner-smoke-summary.json
 uv run python scripts/scan_pii_gliner.py --markdown-dir storage/justice/tenancy/markdown_docling --limit 25 --labels person,address,email,phone_number,national_id,driver_license,passport_number,bank_account,credit_card --threshold 0.3 --output-jsonl logs/tenancy-pii-gliner-canary-25-token300.jsonl --summary-json logs/tenancy-pii-gliner-canary-25-token300-summary.json
+uv run python -m unittest tests/test_scan_pii_privacy_filter.py
+uv run ruff check scripts/scan_pii_privacy_filter.py tests/test_scan_pii_privacy_filter.py
+uv run python - <<'PY'
+from transformers import AutoConfig, AutoTokenizer
+model_id = "openai/privacy-filter"
+config = AutoConfig.from_pretrained(model_id)
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+print(config.model_type, getattr(config, "max_position_embeddings", None), tokenizer.model_max_length)
+PY
+uv run python scripts/scan_pii_privacy_filter.py --markdown-dir storage/justice/tenancy/markdown_docling --limit 25 --output-jsonl logs/tenancy-pii-openai-privacy-filter-canary-25.jsonl --summary-json logs/tenancy-pii-openai-privacy-filter-canary-25-summary.json
 ```
 
 ## Notes
@@ -761,12 +780,13 @@ Important naming boundary:
 1. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
    `tenancy-llm-v2` refresh completes, watching persisted failures and
    Instructor retry volume.
-2. Review the 25-document GLiNER canary spans for useful signal versus expected
-   noise: party names and street addresses look useful, while role words,
-   adjudicator names, application numbers, NZTT citations, and occasional OCR
-   fragments need filtering or downstream interpretation.
-3. Tune GLiNER labels/thresholds and post-filters before any full corpus audit.
-4. If the tuned canary is useful, run the full GLiNER JSONL audit and summarize
+2. Compare the GLiNER and OpenAI Privacy Filter canaries side by side. OpenAI
+   Privacy Filter currently looks cleaner for redacted-placeholder noise, while
+   GLiNER has more configurable-label recall and more false positives.
+3. Tune Privacy Filter post-filters first: remove pronouns/role words, treat
+   known agency/property-management names separately, and decide whether
+   adjudicator names should count as review-relevant PII.
+4. If the tuned Privacy Filter canary is useful, run the full JSONL audit and summarize
    documents that need human redaction review before using results in a
    publication workflow.
 5. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
