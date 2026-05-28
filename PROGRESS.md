@@ -849,6 +849,11 @@ Cloudflare resources:
   distinction between the true per-item context formula (`prompt + max_tokens`)
   and the repo's current batch-packing heuristic
   (`approximate_prompt + thinking_budget`).
+* Updated the tribunal extraction runners so thinking is always enabled for
+  this path. The shared eval runner and full Docling processor now default to
+  `thinking_token_budget=2048` and `max_tokens=4096`, and the test suite locks
+  those settings in. Batch reserve math now follows the thinking-enabled path
+  explicitly instead of inheriting the old no-thinking defaults.
 
 Known issue:
 

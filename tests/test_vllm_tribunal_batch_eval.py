@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from vllm import tribunal_batch_eval as module
+from vllm import tribunal_process_docling as docling_module
 
 
 UNSUPPRESSED_MARKDOWN = """---
@@ -295,6 +298,30 @@ class PayloadTests(unittest.TestCase):
             "tribunal_extraction",
         )
 
+    def test_build_payload_always_enables_thinking_and_includes_budget(self) -> None:
+        case = module.CaseRecord(
+            order_id="209594856",
+            markdown_path="a.md",
+            sidecar_path="a.json",
+            markdown_text="Case A",
+            sidecar={"application_number": "4744510", "date_of_issue": "18/01/2024"},
+            gold_fields={"application_number": "4744510"},
+            approximate_tokens=10,
+            redacted=False,
+        )
+
+        payload = module.build_payload(
+            model="test-model",
+            cases=[case],
+            temperature=0.0,
+            max_tokens=4096,
+            enable_thinking=False,
+            thinking_token_budget=2048,
+        )
+
+        self.assertEqual(payload["chat_template_kwargs"], {"enable_thinking": True})
+        self.assertEqual(payload["thinking_token_budget"], 2048)
+
     def test_validate_schema_flags_missing_keys_enums_and_extra_properties(self) -> None:
         errors = module.validate_response_schema_object(
             {
@@ -358,12 +385,28 @@ class PayloadTests(unittest.TestCase):
             ordered=cases,
             case_count=10,
             target_batch_tokens=1200,
+            enable_thinking=True,
             thinking_token_budget=400,
         )
 
         self.assertEqual([case.order_id for case in selected], ["1", "2"])
-        self.assertEqual(module.reserved_case_tokens(cases[0], 400), 500)
-        self.assertEqual(module.reserved_case_tokens(cases[1], 400), 550)
+        self.assertEqual(module.reserved_case_tokens(cases[0], True, 400), 500)
+        self.assertEqual(module.reserved_case_tokens(cases[1], True, 400), 550)
+
+    def test_reserved_case_tokens_respects_thinking_flag(self) -> None:
+        case = module.CaseRecord(
+            order_id="1",
+            markdown_path="a.md",
+            sidecar_path="a.json",
+            markdown_text="A",
+            sidecar={},
+            gold_fields={},
+            approximate_tokens=100,
+            redacted=False,
+        )
+
+        self.assertEqual(module.reserved_case_tokens(case, False, 2048), 100)
+        self.assertEqual(module.reserved_case_tokens(case, True, 2048), 2148)
 
     def test_build_case_batches_splits_all_cases_by_reserved_tokens(self) -> None:
         cases = [
@@ -384,10 +427,27 @@ class PayloadTests(unittest.TestCase):
             ordered=cases,
             max_cases_per_batch=10,
             target_batch_tokens=650,
+            enable_thinking=True,
             thinking_token_budget=100,
         )
 
         self.assertEqual([[case.order_id for case in batch] for batch in batches], [["1", "2"], ["3"], ["4"]])
+
+    def test_runner_defaults_always_enable_thinking_with_large_budgets(self) -> None:
+        with patch.object(sys, "argv", ["tribunal_batch_eval.py"]):
+            args = module.runner.parse_args()
+
+        self.assertTrue(args.enable_thinking)
+        self.assertEqual(args.max_tokens, 4096)
+        self.assertEqual(args.thinking_token_budget, 2048)
+
+    def test_docling_defaults_always_enable_thinking_with_large_budgets(self) -> None:
+        with patch.object(sys, "argv", ["tribunal_process_docling.py"]):
+            args = docling_module.parse_args()
+
+        self.assertTrue(args.enable_thinking)
+        self.assertEqual(args.max_tokens, 4096)
+        self.assertEqual(args.thinking_token_budget, 2048)
 
 
 class ScoringTests(unittest.TestCase):

@@ -31,14 +31,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=runner.DEFAULT_MODEL)
     parser.add_argument("--max-cases-per-batch", type=int, default=DEFAULT_MAX_CASES_PER_BATCH)
     parser.add_argument("--target-batch-tokens", type=int, default=DEFAULT_TARGET_BATCH_TOKENS)
-    parser.add_argument("--max-tokens", type=int, default=320)
+    parser.add_argument("--max-tokens", type=int, default=runner.DEFAULT_MAX_TOKENS)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
-    parser.add_argument("--enable-thinking", action="store_true")
-    parser.add_argument("--thinking-token-budget", type=int, default=None)
+    parser.add_argument("--thinking-token-budget", type=int, default=runner.DEFAULT_THINKING_TOKEN_BUDGET)
     parser.add_argument("--max-concurrent-batches", type=int, default=2)
     parser.add_argument("--resume", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.enable_thinking = True
+    return args
 
 
 def default_output_dir() -> Path:
@@ -182,7 +183,7 @@ def run_cases_once(
         "case_count": len(cases),
         "approximate_prompt_tokens": sum(case.approximate_tokens for case in cases),
         "approximate_reserved_tokens": sum(
-            runner.reserved_case_tokens(case, args.thinking_token_budget) for case in cases
+            runner.reserved_case_tokens(case, args.enable_thinking, args.thinking_token_budget) for case in cases
         ),
         "cases": runner.compact_case_manifest(cases),
     }
@@ -271,6 +272,7 @@ def process_all(args: argparse.Namespace) -> Path:
         ordered=cases,
         max_cases_per_batch=args.max_cases_per_batch,
         target_batch_tokens=args.target_batch_tokens,
+        enable_thinking=args.enable_thinking,
         thinking_token_budget=args.thinking_token_budget,
     )
     initialize_run(output_dir, args, cases, batches)

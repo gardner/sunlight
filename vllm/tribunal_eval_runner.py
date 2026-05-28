@@ -36,7 +36,9 @@ DEFAULT_MARKDOWN_DIR = Path("storage/justice/tenancy/markdown_docling")
 DEFAULT_SIDECAR_DIR = Path("justice/data/tenancy/pdfs")
 DEFAULT_OUTPUT_DIR = Path("vllm/results")
 DEFAULT_BASE_URL = "http://192.168.88.96:8001"
-DEFAULT_MODEL = "RedHatAI/Qwen3.6-35B-A3B-NVFP4"
+DEFAULT_MODEL = "Qwen/Qwen3.6-27B-FP8"
+DEFAULT_MAX_TOKENS = 4096
+DEFAULT_THINKING_TOKEN_BUDGET = 2048
 
 
 @dataclass(slots=True)
@@ -63,15 +65,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-batch-tokens", type=int, default=None)
     parser.add_argument("--target-prompt-tokens", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--max-tokens", type=int, default=320)
+    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
-    parser.add_argument("--enable-thinking", action="store_true")
-    parser.add_argument("--thinking-token-budget", type=int, default=None)
+    parser.add_argument("--thinking-token-budget", type=int, default=DEFAULT_THINKING_TOKEN_BUDGET)
     parser.add_argument("--no-balanced-redactions", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.enable_thinking = True
+    return args
 
 
 def load_case_record(markdown_path: Path, sidecar_path: Path) -> CaseRecord:
@@ -181,12 +184,13 @@ def select_cases(
     ordered: list[CaseRecord],
     case_count: int,
     target_batch_tokens: int | None,
+    enable_thinking: bool,
     thinking_token_budget: int | None,
 ) -> list[CaseRecord]:
     selected: list[CaseRecord] = []
     batch_tokens = 0
     for case in ordered:
-        reserved_tokens = reserved_case_tokens(case, thinking_token_budget)
+        reserved_tokens = reserved_case_tokens(case, enable_thinking, thinking_token_budget)
         if case_count and len(selected) >= case_count:
             break
         if target_batch_tokens and selected and batch_tokens + reserved_tokens > target_batch_tokens:
@@ -203,6 +207,7 @@ def discover_cases(
     target_batch_tokens: int | None,
     seed: int,
     balanced_redactions: bool,
+    enable_thinking: bool,
     thinking_token_budget: int | None,
 ) -> list[CaseRecord]:
     candidates = load_candidates(markdown_dir=markdown_dir, sidecar_dir=sidecar_dir)
@@ -211,11 +216,18 @@ def discover_cases(
         ordered=ordered,
         case_count=case_count,
         target_batch_tokens=target_batch_tokens,
+        enable_thinking=enable_thinking,
         thinking_token_budget=thinking_token_budget,
     )
 
 
-def reserved_case_tokens(case: CaseRecord, thinking_token_budget: int | None) -> int:
+def reserved_case_tokens(
+    case: CaseRecord,
+    enable_thinking: bool,
+    thinking_token_budget: int | None,
+) -> int:
+    if not enable_thinking:
+        return case.approximate_tokens
     return case.approximate_tokens + max(0, thinking_token_budget or 0)
 
 
@@ -223,6 +235,7 @@ def build_case_batches(
     ordered: list[CaseRecord],
     max_cases_per_batch: int,
     target_batch_tokens: int | None,
+    enable_thinking: bool,
     thinking_token_budget: int | None,
 ) -> list[list[CaseRecord]]:
     remaining = ordered[:]
@@ -232,6 +245,7 @@ def build_case_batches(
             ordered=remaining,
             case_count=max_cases_per_batch,
             target_batch_tokens=target_batch_tokens,
+            enable_thinking=enable_thinking,
             thinking_token_budget=thinking_token_budget,
         )
         if not batch:
@@ -259,7 +273,7 @@ def build_payload(
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "chat_template_kwargs": {"enable_thinking": enable_thinking},
+        "chat_template_kwargs": {"enable_thinking": True},
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -540,6 +554,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         target_batch_tokens=args.target_batch_tokens or args.target_prompt_tokens,
         seed=args.seed,
         balanced_redactions=not args.no_balanced_redactions,
+        enable_thinking=args.enable_thinking,
         thinking_token_budget=args.thinking_token_budget,
     )
     payload = build_payload(
@@ -568,7 +583,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
         "target_batch_tokens": args.target_batch_tokens or args.target_prompt_tokens,
         "approximate_prompt_tokens": sum(case.approximate_tokens for case in cases),
         "approximate_reserved_tokens": sum(
-            reserved_case_tokens(case, args.thinking_token_budget) for case in cases
+            reserved_case_tokens(case, args.enable_thinking, args.thinking_token_budget) for case in cases
         ),
         "cases": compact_case_manifest(cases),
     }

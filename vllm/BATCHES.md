@@ -4,8 +4,8 @@ This repo has tested the vLLM OpenAI-compatible batch chat endpoint against:
 
 - Server: `http://192.168.88.96:8001`
 - Endpoint: `POST /v1/chat/completions/batch`
-- Model: `RedHatAI/Qwen3.6-35B-A3B-NVFP4`
-- Tokenizer override at serve time: `Qwen/Qwen3.6-35B-A3B`
+- Model: `Qwen/Qwen3.6-27B-FP8`
+- Tokenizer override at serve time: `Qwen/Qwen3.6-27B-FP8`
 
 ## What the Batch Endpoint Does
 
@@ -38,7 +38,7 @@ curl -sS http://192.168.88.96:8001/v1/chat/completions/batch \
   -H 'Content-Type: application/json' \
   -d @- <<'JSON'
 {
-  "model": "RedHatAI/Qwen3.6-35B-A3B-NVFP4",
+  "model": "Qwen/Qwen3.6-27B-FP8",
   "messages": [
     [
       {
@@ -70,7 +70,7 @@ For the tribunal markdown classifier, use `structured_outputs.choice`. This is s
 
 ```json
 {
-  "model": "RedHatAI/Qwen3.6-35B-A3B-NVFP4",
+  "model": "Qwen/Qwen3.6-27B-FP8",
   "messages": [
     [
       {
@@ -121,7 +121,7 @@ The explicit `HF_HOME` avoids the current shared Hugging Face cache permission i
 
 ```python
 payload = {
-    "model": "RedHatAI/Qwen3.6-35B-A3B-NVFP4",
+    "model": "Qwen/Qwen3.6-27B-FP8",
     "messages": conversations,
     "temperature": 0,
     "max_tokens": 4,
@@ -302,6 +302,14 @@ The harness:
 - sends one JSON-schema extraction request per case through
   `/v1/chat/completions/batch`
 - writes manifest, payload, response, and scored summary files to `vllm/results`
+
+Current extraction defaults:
+
+- thinking is always enabled for the tribunal extraction runners
+- default `thinking_token_budget` is `2048`
+- default `max_tokens` is `4096`
+- batch packing reserves `approximate_prompt_tokens + thinking_token_budget`
+  per case for these runs
 
 Non-LLM generated-field eval:
 
