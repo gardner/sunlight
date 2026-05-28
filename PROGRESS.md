@@ -2,11 +2,11 @@
 
 ## Current Slice
 
-The public `sunlight.nz/search` path now has a custom hybrid retriever: semantic
-Vectorize candidates plus D1 FTS5 BM25 candidates, fused with reciprocal rank
-fusion and source-diverse citation selection. The current search slice is to
-compare bounded agentic retrieval orchestration against that deterministic
-hybrid baseline before changing production.
+The current slice is reorganizing the repository from exploratory corpus and
+LLM test code into a production-oriented system boundary. `sunlight.nz` should
+remain the OIA/LGOIMA request engine, while public corpus datasets such as FYI,
+Tenancy Tribunal, and future Disputes Tribunal should publish through
+`apps/opendata`.
 
 Completed:
 
@@ -854,6 +854,12 @@ Cloudflare resources:
   `thinking_token_budget=2048` and `max_tokens=4096`, and the test suite locks
   those settings in. Batch reserve math now follows the thinking-enabled path
   explicitly instead of inheriting the old no-thinking defaults.
+* Added `docs/INVENTORY.md` cataloging the current ingestion, LLM, embedding,
+  RAG, evaluation, and artifact paths across Sunlight operational code, FYI,
+  Tenancy Tribunal, the vLLM tribunal lab, and the missing Disputes Tribunal
+  adapter. The inventory records the intended product boundary: operational
+  OIA/LGOIMA workflow stays under Sunlight, while reusable public corpus
+  datasets should be published through OpenData.
 
 Known issue:
 
@@ -873,81 +879,17 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Inspect the `tribunal_big_96_v2` misses by field and by document, especially
-   tribunal-location normalization, placeholder-party naming, and ambiguous
-   payable-direction cases.
-2. Review the judge-spotcheck false positives and tighten the audit rubric for
-   application numbers, bilingual tribunal-location headers, role-vs-name
-   fields, and bond-driven payable direction before relying on LLM judging.
-3. Make the tribunal harness context-aware per item by recording and checking
-   `prompt + max_tokens` against the chosen model limit, separately from the
-   scheduler-style batch reserve heuristic.
-4. Expand the vLLM output schema to emit the MiniMax-style generated retrieval
-   fields so the new non-LLM teacher scorer can grade real predictions instead
-   of just the structured header/order slice.
-5. Run a small generated-field sweep first on batch sizes `1` and `8`, then
-   compare structured exact-field accuracy, schema-valid rate, and teacher-field
-   overlap metrics before scaling back up to the balanced 96-case run.
-6. Keep monitoring the active `tenancy-minimax-v2` tmux run until the
-   `tenancy-llm-v2` refresh completes, watching persisted failures and
-   Instructor retry volume.
-7. Compare the GLiNER and OpenAI Privacy Filter canaries side by side. OpenAI
-   Privacy Filter currently looks cleaner for redacted-placeholder noise, while
-   GLiNER has more configurable-label recall and more false positives.
-6. Tune Privacy Filter post-filters first: remove pronouns/role words, treat
-   known agency/property-management names separately, and decide whether
-   adjudicator names should count as review-relevant PII.
-7. If the tuned Privacy Filter canary is useful, run the full JSONL audit and summarize
-   documents that need human redaction review before using results in a
-   publication workflow.
-8. Do not add NVIDIA `minimaxai/minimax-m2.7` to the production enrichment loop
-   at 15+ scheduled RPM. If it is still worth using, first test a lower
-   scheduled rate with an explicit in-flight cap, then implement provider-level
-   caps before alternating providers.
-9. If `json_schema` proves unstable with `MiniMax-M2.7-highspeed`, retry with
-   `json_mode` before falling back to `md_json`, since `md_json` has the
-   broadest compatibility but the weakest speed and accuracy profile.
-10. Run the reviewed search eval set with `scripts/eval_search.py --no-rerank`
-   and `scripts/eval_search.py --agentic --no-rerank`, then compare final
-   recall@5, MRR@5, exact/numeric misses, second-pass rate, and latency.
-11. Resume Tenancy embedding for the converted legacy markdown with
-   `--skip-convert --skip-llm`, then verify 11,476 legacy embedding markers and
-   updated LanceDB row counts.
-12. Add Tenancy eval questions for exact IDs/citations, city/suburb, rent
-   arrears, bond, suppression, statute-section, amount-heavy, and
-   absent-answer cases.
-13. Export Tenancy source chunks to the D1 BM25 sidecar without resetting
-   existing FYI rows, then export Tenancy vectors to the corpus Vectorize index.
-14. Compare Tenancy vector, BM25, hybrid, agentic, and generated-view retrieval before
-   enabling Tenancy in public search.
-15. Update the landing search API and UI for multi-source citations, labels, and
-   source filters.
-16. Upload canonical Tenancy PDFs and Docling markdown to `sunlight-corpus`.
-17. Choose the Hugging Face dataset repo id, visibility, and license wording,
-   then publish with the exporter upload command.
-18. Schedule the Hugging Face export after FYI markdown ingestion so the dataset
-   stays living; use full snapshots by default and delta exports when append-only
-   updates are useful.
-19. Add an R2 upload command for `sunlight-corpus` that uploads only canonical
-   PDFs and converted markdown, excluding FYI JSON/HTML/CSV sidecars and local
-   metadata.
-20. Create a Cloudflare AI Search instance scoped to the R2 markdown prefix and
-   run the first eval set against both pipelines.
-21. Add R2 markdown hydration to `/api/search` once `sunlight-corpus` is live,
-   so answers can use full chunks instead of Vectorize `text_preview` metadata.
-22. Run `scripts/eval_search.py --rebuild-bm25` once on the full LanceDB corpus
-   to materialize `storage/evals/search/local-bm25.sqlite3`, then compare the
-   reviewed set across vector, BM25, hybrid, and reranked hybrid stages.
-23. Continue expanding the reviewed eval manifest, especially with more
-   numeric/table-heavy FYI records and additional production failures once
-   search logs expose them.
-24. Add optional local vLLM answer generation and answer-grounding checks to the
-   eval harness after retrieval metrics are stable.
-25. Add exact query response caching for `/api/search` to reduce repeated answer
-   generation cost and latency.
-26. Consider moving the search UI to AI SDK `useChat`/streaming once citations
-   can be sent as structured stream data instead of one JSON response.
-27. Do a controlled live Cloudflare Email Sending test before sending to real
-   authorities.
-28. Keep `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` current in Worker secrets
-   if the R2 API token is rotated.
+1. Define a corpus manifest schema that can represent FYI, Sunlight disclosures,
+   Tenancy Tribunal, and Disputes Tribunal before adding more one-off ingestion
+   scripts.
+2. Promote reusable FYI/Tenancy pipeline code into a corpus package while
+   keeping `scripts/` as thin CLI entrypoints.
+3. Decide whether public retrieval uses one corpus-neutral Vectorize index with
+   `corpus` filters or separate per-corpus indexes.
+4. Refactor Tenancy structured extraction to write sidecar JSONL/Parquet
+   artifacts rather than mutating canonical markdown frontmatter.
+5. Build the first `apps/opendata` dataset registry from generated corpus
+   manifests and move public dataset publication concerns out of `apps/landing`.
+6. Create a generic tribunal adapter interface, then implement Disputes
+   Tribunal using the same contract as Tenancy instead of copying the Tenancy
+   script.
