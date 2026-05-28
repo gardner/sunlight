@@ -841,6 +841,14 @@ Cloudflare resources:
   cut parse errors from `16/20` to `3/20`, but the same Qwen judge still
   over-flagged many likely-correct cases, so the audit is currently useful for
   triage rather than as a trustworthy automatic score.
+* Added `TOKEN_DISTRIBUTION.md` as a sysadmin-oriented summary of the tribunal
+  vLLM request shapes: per-item prompt percentiles across all `43,854` Docling
+  markdowns, actual prompt/completion percentiles across the completed
+  `483`-batch corpus run, and the no-thinking versus thinking-budget usage
+  deltas from the fixed `96`-case benchmark runs. The note also records the key
+  distinction between the true per-item context formula (`prompt + max_tokens`)
+  and the repo's current batch-packing heuristic
+  (`approximate_prompt + thinking_budget`).
 
 Known issue:
 
