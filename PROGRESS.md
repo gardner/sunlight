@@ -4,9 +4,8 @@
 
 The current slice is reorganizing the repository from exploratory corpus and
 LLM test code into a production-oriented system boundary. `sunlight.nz` should
-remain the OIA/LGOIMA request engine, while public corpus datasets such as FYI,
-Tenancy Tribunal, and future Disputes Tribunal should publish through
-`apps/opendata`.
+remain the OIA/LGOIMA request engine and one upstream data source, while public
+corpus datasets, search, and chatbots should publish through `apps/opendata`.
 
 Completed:
 
@@ -860,6 +859,12 @@ Cloudflare resources:
   adapter. The inventory records the intended product boundary: operational
   OIA/LGOIMA workflow stays under Sunlight, while reusable public corpus
   datasets should be published through OpenData.
+* Updated `docs/INVENTORY.md` to reflect the intended external spider handoff:
+  scraping and markdown conversion happen outside this repo, the interface is
+  an R2/S3 bucket with manifest-described directories, and this repo should
+  process those directories as idempotent queues. The update also clarifies that
+  OpenData owns dataset search/chat, and Sunlight disclosures should flow into
+  OpenData as one source.
 
 Known issue:
 
@@ -879,17 +884,21 @@ Important naming boundary:
 
 ## Next Steps
 
-1. Define a corpus manifest schema that can represent FYI, Sunlight disclosures,
-   Tenancy Tribunal, and Disputes Tribunal before adding more one-off ingestion
-   scripts.
-2. Promote reusable FYI/Tenancy pipeline code into a corpus package while
+1. Define a corpus manifest schema and R2/S3 queue contract that can represent
+   FYI, Sunlight disclosures, Tenancy Tribunal, and Disputes Tribunal before
+   adding more one-off ingestion scripts.
+2. Implement a manifest registry/import-run table and queue runner that claims
+   markdown objects by key, ETag/checksum, corpus id, snapshot id, and import
+   profile.
+3. Promote reusable FYI/Tenancy pipeline code into a corpus package while
    keeping `scripts/` as thin CLI entrypoints.
-3. Decide whether public retrieval uses one corpus-neutral Vectorize index with
+4. Decide whether public retrieval uses one corpus-neutral Vectorize index with
    `corpus` filters or separate per-corpus indexes.
-4. Refactor Tenancy structured extraction to write sidecar JSONL/Parquet
+5. Refactor Tenancy structured extraction to write sidecar JSONL/Parquet
    artifacts rather than mutating canonical markdown frontmatter.
-5. Build the first `apps/opendata` dataset registry from generated corpus
-   manifests and move public dataset publication concerns out of `apps/landing`.
-6. Create a generic tribunal adapter interface, then implement Disputes
+6. Build the first `apps/opendata` dataset registry, search route, and chatbot
+   route from generated corpus manifests, and move public dataset publication
+   concerns out of `apps/landing`.
+7. Create a generic tribunal adapter interface, then implement Disputes
    Tribunal using the same contract as Tenancy instead of copying the Tenancy
    script.

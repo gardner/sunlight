@@ -7,10 +7,12 @@ datasets, or evaluate those systems.
 The main architectural boundary is:
 
 * `sunlight.nz` should be the OIA/LGOIMA request engine and first-party
-  disclosure workflow.
+  disclosure workflow. It is one upstream data source for OpenData.
 * `apps/opendata` should be the dataset publication surface for public corpora
   such as FYI, Tenancy Tribunal, Disputes Tribunal, and later Sunlight
-  disclosure datasets.
+  disclosure datasets. It should own dataset search and chatbots.
+* Scraping and markdown conversion can be owned by an external spider service.
+  The handoff to this repo should be an R2/S3 bucket with directory manifests.
 * Corpus processing should be shared infrastructure, not a one-off pile of
   FYI-, Tenancy-, or vLLM-specific scripts.
 
@@ -19,19 +21,86 @@ The main architectural boundary is:
 | Area | Current files | Current role | Production boundary |
 | --- | --- | --- | --- |
 | Sunlight operational engine | `apps/admin`, `apps/authority`, `apps/inbound-email`, `cloudflare/migrations` | Create OIA/LGOIMA requests, collect responses, store uploads, review workflow | Keep here. This is the OIA/LGOIMA engine. |
-| Sunlight public site/search | `apps/landing` | Landing page plus `/search` and `/api/search` over the current public FYI-style index | Search may remain for Sunlight disclosures, but broad public corpora should move behind OpenData. |
-| OpenData publication site | `apps/opendata`, `docs/OPENDATA.md` | Static public-interest data site; no dataset registry or pipeline yet | Should own dataset pages, download manifests, provenance, and corpus-specific public search. |
+| Sunlight public site/search | `apps/landing` | Landing page plus `/search` and `/api/search` over the current public FYI-style index | Should shrink back to Sunlight request/response product concerns. Broad corpus search and chat belong in OpenData. |
+| OpenData publication site | `apps/opendata`, `docs/OPENDATA.md` | Static public-interest data site; no dataset registry or pipeline yet | Should own dataset pages, download manifests, provenance, corpus-specific search, and dataset chatbots. |
+| External spider service | Outside this repo | Scrapes public data and converts source documents to markdown | Handoff is R2/S3 prefixes plus manifests. This repo should consume those prefixes as queues. |
 | Corpus processing scripts | `scripts/*`, `vllm/*` | Mixed production-ish pipelines, probes, evals, and experiments | Promote stable code into shared corpus pipeline modules with thin CLI entrypoints. |
 | Local/vector stores | `storage/**`, `fyi/**`, `justice/**`, `vllm/results/**` | Local source data, converted markdown, LanceDB stores, eval/extraction outputs | Treat as build artifacts and source snapshots, not application code or canonical product boundaries. |
+
+## External Spider Handoff
+
+The production ingestion boundary should be a bucket contract, not local scrape
+logic. The spider service should scrape and convert documents to markdown, then
+write source objects, markdown, metadata, and a manifest into an R2/S3 bucket.
+This repo should read those manifests and process each directory as a resumable
+queue.
+
+Recommended bucket shape:
+
+```text
+s3://opendata-ingest/
+  manifests/
+    justice_tenancy/v1/2026-05-29T000000Z.json
+    justice_disputes/v1/2026-05-29T000000Z.json
+    fyi_oia/v1/2026-05-29T000000Z.json
+    sunlight_disclosures/v1/2026-05-29T000000Z.json
+  corpora/
+    justice_tenancy/v1/markdown/...
+    justice_tenancy/v1/assets/...
+    justice_tenancy/v1/metadata/...
+    justice_disputes/v1/markdown/...
+    fyi_oia/v1/markdown/...
+    sunlight_disclosures/v1/markdown/...
+```
+
+The manifest should tell the importer how to process the directory. It should
+not rely on path naming alone.
+
+Minimum manifest fields:
+
+| Field | Purpose |
+| --- | --- |
+| `manifest_version` | Version the handoff contract independently from dataset schema versions. |
+| `corpus_id` | Stable corpus id such as `justice_tenancy`, `justice_disputes`, `fyi_oia`, or `sunlight_disclosures`. |
+| `dataset_id` | Public OpenData dataset id, which may be broader than a single corpus run. |
+| `source_system` | `external_spider`, `sunlight`, or another source producer. |
+| `import_profile` | Selects the processing recipe, schema, extraction prompt, privacy rules, and indexes. |
+| `snapshot_id` | Immutable spider output version for idempotency and reproducibility. |
+| `input_prefixes` | Markdown, source assets, metadata sidecars, and optional prior extraction prefixes. |
+| `document_id_strategy` | How stable document ids are derived or read. |
+| `metadata_schema` | Expected metadata shape and required fields. |
+| `extraction_schema` | Optional LLM structured extraction schema to run after import. |
+| `privacy_profile` | PII/redaction rules and publication gates. |
+| `index_targets` | OpenData search/chat indexes to update after validation. |
+| `publish_targets` | Dataset outputs such as OpenData pages, Parquet, JSONL, R2 public prefixes, or Hugging Face. |
+
+Queue behavior:
+
+1. Poll or receive manifest notifications from the ingest bucket.
+2. Register an import run keyed by `corpus_id + snapshot_id + manifest_etag`.
+3. Enumerate markdown objects under the manifest prefixes.
+4. Create idempotent work items with object key, ETag/checksum, document id, and
+   selected `import_profile`.
+5. Process each item through validation, extraction, chunking, embedding,
+   indexing, and publication stages.
+6. Persist stage status and output artifact keys so retries never duplicate
+   rows or silently skip stale work.
+7. Promote a dataset version only after manifest-level eval and validation
+   gates pass.
+
+This changes the role of local Docling conversion code. It remains useful for
+development, validation, and Sunlight-owned uploaded responses when no spider
+conversion exists, but the default public-corpus path should start from
+spider-produced markdown in R2/S3.
 
 ## Corpus State
 
 | Corpus | Current state | Main source paths | Main processing paths | Gaps |
 | --- | --- | --- | --- | --- |
-| Sunlight OIA/LGOIMA responses | Operational request/response intake exists. No production corpus conversion/indexing path found. | R2 `sunlight-request-artifacts`, D1 `sunlight-requests` | `apps/admin`, `apps/authority`, `apps/inbound-email` | Need approval-to-publication pipeline: response artifacts to canonical markdown, metadata, chunks, embeddings, dataset rows, and search indexes. |
-| FYI OIA/LGOIMA archive | Most mature RAG corpus. Docling conversion, local LanceDB vectors, Vectorize export, D1 BM25, Hugging Face dataset export exist. | `fyi/data/request`, `fyi/markdown` | `scripts/parallel_convert_and_embed.py`, `scripts/export_to_vectorize.py`, `scripts/upload_to_vectorize.py`, `scripts/export_bm25_to_d1.py`, `scripts/export_hf_markdown_dataset.py` | Names and bindings are FYI-specific and currently leak into generic search. |
-| Tenancy Tribunal | Production-ish Docling and embedding path exists. Structured vLLM extraction path exists and looks promising. Historical LLM enrichment path is riskier. | `justice/data/tenancy/**`, `storage/justice/tenancy/markdown_docling` | `scripts/ingest_tenancy.py`, `scripts/tenancy_corpus.py`, `scripts/tenancy_llm.py`, `vllm/tribunal_process_docling.py` | Need source/extraction separation, corpus-neutral indexing, OpenData dataset publication, and better eval gates before publishing. |
-| Disputes Tribunal | No first-class ingestion adapter found. Repo searches for `disputes`/`Disputes Tribunal` only found planning-level references. | None found | None found | Needs a new tribunal adapter that reuses the Tenancy/vLLM pipeline contract instead of copying Tenancy scripts. |
+| Sunlight OIA/LGOIMA responses | Operational request/response intake exists. No production corpus export/indexing path found. | R2 `sunlight-request-artifacts`, D1 `sunlight-requests`; later OpenData ingest manifest from approved disclosures | `apps/admin`, `apps/authority`, `apps/inbound-email` | Need approval-to-publication export that makes Sunlight disclosures one OpenData source. |
+| FYI OIA/LGOIMA archive | Most mature RAG corpus. Current code owns Docling conversion, local LanceDB vectors, Vectorize export, D1 BM25, Hugging Face dataset export. Target path should consume spider-produced markdown/manifests. | Today: `fyi/data/request`, `fyi/markdown`. Target: R2/S3 `fyi_oia` manifest prefixes. | `scripts/parallel_convert_and_embed.py`, `scripts/export_to_vectorize.py`, `scripts/upload_to_vectorize.py`, `scripts/export_bm25_to_d1.py`, `scripts/export_hf_markdown_dataset.py` | Names and bindings are FYI-specific and currently leak into generic search. Need importer profile from manifests. |
+| Tenancy Tribunal | Production-ish local Docling and embedding path exists. Structured vLLM extraction path exists and looks promising. Target path should consume spider-produced tribunal markdown/manifests. | Today: `justice/data/tenancy/**`, `storage/justice/tenancy/markdown_docling`. Target: R2/S3 `justice_tenancy` manifest prefixes. | `scripts/ingest_tenancy.py`, `scripts/tenancy_corpus.py`, `scripts/tenancy_llm.py`, `vllm/tribunal_process_docling.py` | Need source/extraction separation, corpus-neutral indexing, OpenData dataset publication, and better eval gates before publishing. |
+| Disputes Tribunal | No first-class ingestion adapter found. Repo searches for `disputes`/`Disputes Tribunal` only found planning-level references. | Target: R2/S3 `justice_disputes` manifest prefixes from external spider. | None found | Needs a manifest import profile and tribunal adapter that reuses the Tenancy/vLLM pipeline contract. |
 | Authority/contact metadata | Mature operational metadata ingestion and scraping exists. | FYI authority imports, MoJ directory, authority websites | `scripts/import_fyi_authorities.py`, `scripts/scrape_authority_contacts.py`, `scripts/scrape_moj_directory.py`, `scripts/import_moj_authorities.py`, `scripts/scrape_proactive_pages.py` | This supports the OIA engine, not public corpus RAG directly. Keep it separate from dataset pipelines. |
 
 ## Current Ingestion Processes
@@ -74,9 +143,12 @@ LLM/AI use:
 Production status:
 
 * This is application workflow code, not a dataset pipeline.
+* Sunlight should publish approved disclosure snapshots to the OpenData ingest
+  bucket or manifest registry. OpenData then owns dataset indexing, search, and
+  chat over those disclosures.
 * There is no completed path that turns approved Sunlight response artifacts
-  into public corpus records, markdown, embeddings, Vectorize rows, D1 BM25
-  rows, or OpenData datasets.
+  into OpenData manifest entries, corpus records, markdown, embeddings,
+  Vectorize rows, D1 BM25 rows, or dataset pages.
 
 ### 2. FYI Corpus Conversion, Embedding, and Indexing
 
@@ -103,9 +175,9 @@ Current main path:
 
 Data flow:
 
-1. Input PDFs under `fyi/data/request`.
-2. Docling conversion writes markdown under `fyi/markdown` with provenance
-   frontmatter.
+1. Current local path starts from PDFs under `fyi/data/request`.
+2. Current local Docling conversion writes markdown under `fyi/markdown` with
+   provenance frontmatter.
 3. Markdown is chunked with the same chunking helpers used by search/BM25.
 4. Local `Qwen/Qwen3-Embedding-0.6B` embeddings are calculated with
    `llama-index-embeddings-huggingface`.
@@ -118,6 +190,14 @@ Data flow:
 9. Public search in `apps/landing` queries Vectorize and D1 BM25.
 10. Dataset export writes Parquet/manifest/card artifacts under
     `storage/huggingface/sunlight-fyi-markdown`.
+
+Target handoff:
+
+* External spider writes FYI markdown and metadata into R2/S3.
+* This repo imports by reading the FYI manifest and queueing the listed
+  prefixes.
+* Docling conversion should become a fallback/dev path, not the normal FYI
+  import path.
 
 Production status:
 
@@ -146,9 +226,9 @@ Files:
 
 Current flow:
 
-1. Source PDFs and sidecars are discovered from `justice/data/tenancy/pdfs` and
-   `justice/data/tenancy/legacy/pdf`.
-2. Docling conversion writes canonical markdown into
+1. Current local path discovers source PDFs and sidecars from
+   `justice/data/tenancy/pdfs` and `justice/data/tenancy/legacy/pdf`.
+2. Current local Docling conversion writes canonical markdown into
    `storage/justice/tenancy/markdown_docling`.
 3. Optional LLM enrichment writes generated frontmatter fields such as
    `case_summary`, `questions_answered`, `neutral_fact_pattern`,
@@ -156,6 +236,16 @@ Current flow:
 4. Markdown and generated retrieval views are chunked with FYI-derived helpers.
 5. Local Qwen embeddings are written to LanceDB at
    `storage/justice/tenancy/lancedb`, table `chunks_v2`.
+
+Target handoff:
+
+* External spider writes tribunal markdown and metadata into R2/S3 prefixes
+  described by a `justice_tenancy` manifest.
+* This repo validates the markdown, runs vLLM structured extraction if the
+  manifest import profile requires it, chunks/embeds/indexes the documents, and
+  publishes the dataset to OpenData.
+* Local Docling conversion remains a validation/development tool or fallback for
+  corpus sources that do not yet have spider-produced markdown.
 
 Known local corpus counts from repo docs:
 
@@ -268,7 +358,8 @@ Embedding fracture points:
 | D1 `sunlight-search.disclosed_chunks` | `scripts/export_bm25_to_d1.py`, `apps/landing` | Chunk text plus metadata | BM25/FTS5 sidecar retrieval | Good generic table name, but importer defaults are FYI-first. |
 | Workers AI answer generation | `apps/landing/app/api/search/route.ts` | Top selected citations | Runtime RAG answer | Should not be confused with corpus ingestion. |
 | Cloudflare AI Search | `docs/RAG.md`, `docs/VECTORS.md` | Planned R2 markdown prefixes | Managed retrieval alternative | Planned/eval path, not implemented. |
-| R2 public corpus bucket | `docs/VECTORS.md` | Planned canonical PDFs, markdown, chunks, manifests | Durable public corpus object store | Planned as `sunlight-corpus`; not the same as operational `sunlight-request-artifacts`. |
+| R2/S3 ingest bucket | New manifest-driven queue needed | Spider-produced markdown, metadata, assets, and manifests | Handoff point between spider service and corpus importer | The importer should process manifests and prefixes as queues. |
+| R2 public corpus bucket | `docs/VECTORS.md` | Validated PDFs, markdown, chunks, manifests, extraction artifacts | Durable public corpus object store | Planned as `sunlight-corpus`; not the same as operational `sunlight-request-artifacts` or the raw ingest bucket. |
 | Hugging Face dataset export | `scripts/export_hf_markdown_dataset.py` | FYI markdown | Public dataset snapshot/delta | FYI only today; OpenData should own dataset catalog/links. |
 
 ## Eval and QA Inventory
@@ -287,7 +378,8 @@ Embedding fracture points:
 | Path/bucket | Contents | Canonical role |
 | --- | --- | --- |
 | `sunlight-request-artifacts` R2 | Raw inbound emails, authority uploads, operational response artifacts | Private/operational source store for the OIA engine |
-| Planned `sunlight-corpus` R2 | Canonical public PDFs, markdown, chunks, manifests | Public corpus object store for dataset/search publication |
+| External R2/S3 ingest bucket | Spider-produced markdown, source assets, sidecars, and manifests | Queue source for public corpus processing |
+| Planned `sunlight-corpus` R2 | Validated public PDFs, markdown, chunks, manifests, extraction sidecars | Public corpus object store for dataset/search publication |
 | `fyi/data/request` | FYI source PDFs | Local source snapshot |
 | `fyi/markdown` | FYI Docling markdown plus provenance | Local normalized corpus source |
 | `storage/fyi_parallel.lancedb` | FYI chunk vectors | Local index/export source |
@@ -310,67 +402,87 @@ Embedding fracture points:
    publication too tightly.
 5. vLLM exploration is promising but sits outside the production corpus
    pipeline contracts.
-6. OpenData is currently a website, not a dataset publication app.
+6. OpenData is currently a website, not a dataset publication, search, or
+   chatbot app.
 7. Sunlight public search currently behaves like a broad public corpus search,
-   while the product boundary should reserve Sunlight for OIA/LGOIMA operations
-   and first-party disclosures.
+   while the product boundary should reserve Sunlight for OIA/LGOIMA operations.
+   Sunlight disclosures should flow into OpenData as one dataset source.
 8. There is no Disputes Tribunal adapter.
 9. Token budgets, model IDs, provider choices, response parsing, and retry
    policies are duplicated across paths.
 10. Evaluation exists, but each area has its own harness and artifact shape.
+11. No manifest-driven queue exists yet for processing spider-produced R2/S3
+    directories.
 
 ## Recommended Production Shape
 
-Create a shared corpus pipeline with stable stage contracts and corpus adapters.
-The immediate goal is not a huge framework; it is to stop copying pipeline
-logic across FYI, Tenancy, Disputes, and Sunlight disclosures.
+Create a shared corpus pipeline with stable manifest, queue, and stage
+contracts. The immediate goal is not a huge framework; it is to stop copying
+pipeline logic across FYI, Tenancy, Disputes, and Sunlight disclosures.
 
 Suggested stages:
 
-1. `discover`: enumerate source documents and immutable source metadata.
-2. `convert`: create canonical markdown from source PDFs or uploaded files.
-3. `normalize`: produce deterministic corpus metadata and public R2 keys.
-4. `extract`: run structured LLM extraction into sidecar JSONL/Parquet.
-5. `enrich`: optionally produce generated retrieval views as separate artifacts.
-6. `chunk`: produce deterministic chunks with chunk schema versioning.
-7. `embed`: calculate vectors and write a local corpus-neutral vector store.
-8. `index`: export to Vectorize, D1 BM25, AI Search, or other retrieval stores.
-9. `publish`: write OpenData dataset manifests, cards, downloads, and pages.
-10. `eval`: run schema, extraction, retrieval, privacy, and publication gates.
+1. `register_manifest`: read an R2/S3 manifest and create an idempotent import
+   run.
+2. `queue`: enumerate manifest prefixes and create object-level work items.
+3. `validate`: verify markdown, sidecars, checksums, required metadata, and
+   source provenance.
+4. `normalize`: produce deterministic corpus metadata and public R2 keys.
+5. `extract`: run structured LLM extraction into sidecar JSONL/Parquet when the
+   manifest profile requires it.
+6. `enrich`: optionally produce generated retrieval views as separate artifacts.
+7. `chunk`: produce deterministic chunks with chunk schema versioning.
+8. `embed`: calculate vectors and write a local corpus-neutral vector store.
+9. `index`: export to Vectorize, D1 BM25, AI Search, or other retrieval stores
+   used by OpenData.
+10. `publish`: write OpenData dataset manifests, cards, downloads, search pages,
+    and chatbot configuration.
+11. `eval`: run schema, extraction, retrieval, privacy, and publication gates.
+
+Optional stage:
+
+* `convert`: create canonical markdown from source PDFs or uploaded files only
+  for Sunlight-owned uploads or corpora that do not yet have spider-produced
+  markdown. It should not be the default public-corpus ingestion boundary.
 
 Suggested adapters:
 
 | Adapter | Source | Initial implementation |
 | --- | --- | --- |
-| `fyi_oia` | FYI public OIA/LGOIMA archive | Wrap current FYI Docling, LanceDB, Vectorize, BM25, and HF export paths |
-| `sunlight_disclosures` | Approved Sunlight response artifacts | New adapter from D1/R2 operational records into public corpus artifacts |
-| `justice_tenancy` | Tenancy Tribunal decisions | Wrap current Tenancy Docling source adapter and vLLM extraction output |
-| `justice_disputes` | Disputes Tribunal decisions | New adapter modeled on tribunal interface, not copied from Tenancy |
+| `fyi_oia` | External spider manifest for FYI public OIA/LGOIMA markdown | Wrap current FYI chunking, embedding, Vectorize, BM25, and dataset export paths; demote local Docling to fallback |
+| `sunlight_disclosures` | Approved Sunlight response artifacts exported from operational D1/R2 | New exporter from Sunlight into OpenData manifest format, then normal manifest import |
+| `justice_tenancy` | External spider manifest for Tenancy Tribunal markdown | Wrap current tribunal metadata/extraction/indexing logic around manifest queue items |
+| `justice_disputes` | External spider manifest for Disputes Tribunal markdown | New adapter modeled on tribunal manifest profile, not copied from Tenancy |
 
 Suggested code organization:
 
 * Keep CLI entrypoints in `scripts/` for now.
 * Move reusable code into package modules such as `sunlight/corpus/` or
   `corpora/`.
+* Add a manifest importer and queue runner before adding more corpus-specific
+  scripts.
 * Keep `vllm/` as the lab until the extraction contract stabilizes, then promote
   the shared schema/request/validation code into the corpus package.
 * Move dataset publication concerns into `apps/opendata` plus a build-time
-  dataset registry.
+  dataset registry, search/chat routes, and per-dataset bot configuration.
 * Keep operational OIA/LGOIMA workflow code in `apps/admin`,
   `apps/authority`, `apps/inbound-email`, and D1/R2 operational migrations.
 
 ## Immediate Design Decisions
 
-1. Define a corpus manifest schema before adding Disputes Tribunal.
+1. Define a corpus manifest schema and R2/S3 queue contract before adding
+   Disputes Tribunal.
 2. Decide whether Vectorize is one global corpus index with `corpus` metadata
    filters or one index per public corpus.
-3. Rename FYI-specific bindings and scripts only after the corpus manifest
+3. Decide how Sunlight exports approved response artifacts into the OpenData
+   manifest format.
+4. Rename FYI-specific bindings and scripts only after the corpus manifest
    contract exists.
-4. Stop writing future LLM generated fields into canonical markdown
+5. Stop writing future LLM generated fields into canonical markdown
    frontmatter; write sidecars and generated retrieval views instead.
-5. Promote the vLLM strict JSON extraction path into the canonical tribunal
+6. Promote the vLLM strict JSON extraction path into the canonical tribunal
    extraction stage after the next accuracy/eval pass.
-6. Build the first `apps/opendata` dataset registry page from generated
-   manifests, not hard-coded marketing copy.
-7. Add a Disputes adapter only after Tenancy is represented as a generic
+7. Build the first `apps/opendata` dataset registry, search page, and chatbot
+   route from generated manifests, not hard-coded marketing copy.
+8. Add a Disputes adapter only after Tenancy is represented as a generic
    tribunal adapter.
